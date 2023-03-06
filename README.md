@@ -1,1 +1,0 @@
-# g-spaulding.github.io

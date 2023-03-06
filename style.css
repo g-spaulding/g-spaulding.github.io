@@ -27,6 +27,10 @@ h3 {
     }
 }
 
+img {
+    width:100%;
+}
+
 .date {
     font-style:italic;
 }
