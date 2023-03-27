@@ -1,8 +1,3 @@
 
-
-
-figure out how to style post-title nicely on both light and dark
-add margins around post-title cards
-increase width?
-figure out how to debug light mode
+change font stack
 re-size images
