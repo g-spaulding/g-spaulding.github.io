@@ -1,21 +1,13 @@
-body {
-    max-width: 650px;
-    margin: 40px auto;
-    padding: 0 10px;
-    font: 18px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-    color: #444
-}
-
-h1,
-h2,
-h3 {
-    line-height: 1.2
+html {
+    --bg: #cfc3c3;
+    --fg: #292929;
 }
 
 @media (prefers-color-scheme: dark) {
-    body {
-        color: #c9d1d9;
-        background: #0d1117
+    html {
+        --bg: #0d1117;
+        --fg: #cfc3c3;
+        
     }
 
     a:link {
@@ -27,10 +19,50 @@ h3 {
     }
 }
 
+body {
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 0 20px;
+    font: 18px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    color: var(--fg);
+    background: var(--bg);
+}
+
+h1,
+h2,
+h3 {
+    line-height: 1.2
+}
+
+
+
 img {
     width:100%;
 }
 
 .date {
     font-style:italic;
+}
+
+.post-title {
+    background-position: center; 
+    background-repeat: no-repeat; 
+    background-size: cover;
+    height: 10rem;
+    color: #cfc3c3;
+    text-shadow: #0d1117 1px 1px;
+}
+
+.post-list a:link, .post-list a:visited {
+    color: inherit;
+    text-decoration: none;
+    
+}
+
+#tspsf {
+    background-image: url("./skateParkSoFar/resized_8sphere.jpg");
+}
+
+#tbsf {
+    background-image: url("./theBarnSoFar/resized_long_shot.jpg");
 }
