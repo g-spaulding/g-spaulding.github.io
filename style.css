@@ -40,6 +40,15 @@ img {
     width:100%;
 }
 
+aside {
+    font-size: .8rem;
+    padding:.4rem;
+    margin:1rem;
+    border-color: var(--fg);
+    border-style: solid;
+    border-width: 1px;
+}
+
 .date {
     font-style:italic;
 }
@@ -66,4 +75,12 @@ img {
 
 #tbsf {
     background-image: url("./theBarnSoFar/resized_long_shot.jpg");
+}
+
+#initial {
+    background-color: #292929;
+}
+
+#ht1 {
+    background-image: url("./HighTunnel/nightHT.jpg");
 }
