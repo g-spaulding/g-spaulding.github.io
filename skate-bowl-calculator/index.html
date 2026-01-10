@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skate Bowl Rib Calculator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Skate Bowl Rib Calculator</h1>
+        <p class="description">Calculate rib lengths and compound miter angles for wooden skate bowl construction.</p>
+
+        <form id="calculator-form">
+            <div class="input-group">
+                <label for="radius">Radius</label>
+                <div class="input-with-unit">
+                    <input type="number" id="radius" step="0.1" value="8" required>
+                    <select id="radius-unit">
+                        <option value="ft">ft</option>
+                        <option value="in">in</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="fan-angle">Angle Between Supports</label>
+                <div class="input-with-unit">
+                    <input type="number" id="fan-angle" step="0.5" value="15" min="1" max="45" required>
+                    <span class="unit">degrees</span>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="rib-spacing">Rib Spacing (along arc)</label>
+                <div class="input-with-unit">
+                    <input type="number" id="rib-spacing" step="0.5" value="8" required>
+                    <span class="unit">inches</span>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="max-height">Maximum Height</label>
+                <div class="input-with-unit">
+                    <input type="number" id="max-height" step="0.1" value="6" required>
+                    <select id="height-unit">
+                        <option value="ft">ft</option>
+                        <option value="in">in</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="support-thickness">Support Thickness (plywood)</label>
+                <div class="input-with-unit">
+                    <input type="number" id="support-thickness" step="0.125" value="0.75" required>
+                    <span class="unit">inches</span>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="rib-thickness">Rib Thickness (lumber)</label>
+                <div class="input-with-unit">
+                    <input type="number" id="rib-thickness" step="0.25" value="1.5" required>
+                    <span class="unit">inches</span>
+                </div>
+            </div>
+
+            <button type="submit">Calculate</button>
+        </form>
+
+        <div id="results" class="results hidden">
+            <h2>Rib Cut List</h2>
+            <p class="results-note">Measurements are to the bottom (shorter) edge of each rib. Distances measured from top of ramp.</p>
+            <table id="results-table">
+                <thead>
+                    <tr>
+                        <th>Rib #</th>
+                        <th>Distance from Top</th>
+                        <th>Length</th>
+                        <th>Miter</th>
+                        <th>Bevel</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
