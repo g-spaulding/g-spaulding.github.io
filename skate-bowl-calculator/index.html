@@ -4,9 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Skate Bowl Rib Calculator</title>
+    <link rel="stylesheet" href="../style.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <nav><p><a href="../index.html">blog</a> | <a href="../tools.html">tools</a></p></nav>
+
     <div class="container">
         <h1>Skate Bowl Rib Calculator</h1>
         <p class="description">Calculate rib lengths and compound miter angles for wooden skate bowl construction.</p>
@@ -24,10 +27,17 @@
             </div>
 
             <div class="input-group">
-                <label for="fan-angle">Angle Between Supports</label>
+                <label for="corner-angle">Corner Angle</label>
                 <div class="input-with-unit">
-                    <input type="number" id="fan-angle" step="0.5" value="15" min="1" max="45" required>
+                    <input type="number" id="corner-angle" step="1" value="90" min="1" max="180" required>
                     <span class="unit">degrees</span>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="num-sections">Number of Sections</label>
+                <div class="input-with-unit">
+                    <input type="number" id="num-sections" step="1" value="6" min="1" max="20" required>
                 </div>
             </div>
 
@@ -70,8 +80,20 @@
         </form>
 
         <div id="results" class="results hidden">
+            <h2>Corner Layout</h2>
+            <dl id="layout-info">
+                <dt>Angle between supports</dt>
+                <dd id="angle-between-supports"></dd>
+                <dt>Top radius</dt>
+                <dd id="top-radius"></dd>
+                <dd class="note">Use this radius to cut your deck. This should also be the horizontal distance from the coping to where everything meets at the bottom.</dd>
+                <dt>Top straight line distance</dt>
+                <dd id="top-chord"></dd>
+                <dd class="note">Use this measurement to make sure your corner angle is accurate. You can measure at the bottom from lines straight down from the coping.</dd>
+            </dl>
+
             <h2>Rib Cut List</h2>
-            <p class="results-note">Measurements are to the bottom (shorter) edge of each rib. Distances measured from top of ramp.</p>
+            <p class="results-note">Measurements are to the bottom (shortest) edge of each rib. Distances measured from top of ramp.</p>
             <table id="results-table">
                 <thead>
                     <tr>

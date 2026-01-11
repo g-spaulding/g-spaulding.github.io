@@ -7,7 +7,8 @@ function calculateRibs() {
     // Get inputs
     const radiusValue = parseFloat(document.getElementById('radius').value);
     const radiusUnit = document.getElementById('radius-unit').value;
-    const fanAngleDeg = parseFloat(document.getElementById('fan-angle').value);
+    const cornerAngleDeg = parseFloat(document.getElementById('corner-angle').value);
+    const numSections = parseInt(document.getElementById('num-sections').value);
     const ribSpacing = parseFloat(document.getElementById('rib-spacing').value);
     const maxHeightValue = parseFloat(document.getElementById('max-height').value);
     const heightUnit = document.getElementById('height-unit').value;
@@ -24,15 +25,28 @@ function calculateRibs() {
         return;
     }
 
-    // Convert fan angle to radians
+    // Calculate angle between supports (fan angle)
+    const fanAngleDeg = cornerAngleDeg / numSections;
     const fanAngleRad = fanAngleDeg * Math.PI / 180;
+    const cornerAngleRad = cornerAngleDeg * Math.PI / 180;
 
     // Calculate the angle at the top cutoff
     // Height h = R × (1 - cos(α)), so α = arccos(1 - h/R)
     const alphaMax = Math.acos(1 - maxHeight / radius);
 
+    // Layout calculations
+    // Top radius = horizontal distance from toe to top of ramp
+    const topRadius = radius * Math.sin(alphaMax);
+    // Top straight line distance = chord across entire corner at top
+    const topChord = 2 * topRadius * Math.sin(cornerAngleRad / 2);
+
     // Total arc length from bottom (toe) to top (cutoff)
     const totalArcLength = radius * alphaMax;
+
+    // Support thickness to deduct per rib
+    // Total deduction across corner = (numSections - 1) × supportThickness
+    // Per rib = that total / numSections
+    const thicknessPerRib = (numSections - 1) * supportThickness / numSections;
 
     // Calculate rib positions (from top, measuring to bottom edge of rib)
     // First rib: ribThickness down from top
@@ -53,9 +67,9 @@ function calculateRibs() {
         // Horizontal distance from toe: d = R × sin(α)
         const horizDist = radius * Math.sin(alpha);
 
-        // Rib length: 2 × d × tan(θ/2) - supportThickness (1× for shared supports)
+        // Rib length: 2 × d × tan(θ/2) - thickness deduction for shared supports
         const rawLength = 2 * horizDist * Math.tan(fanAngleRad / 2);
-        const ribLength = rawLength - supportThickness;
+        const ribLength = rawLength - thicknessPerRib;
 
         // Compound miter angles
         // The rib meets a surface that is:
@@ -84,10 +98,14 @@ function calculateRibs() {
         distanceFromTop += ribSpacing;
     }
 
-    displayResults(ribs);
+    displayResults(ribs, {
+        angleBetweenSupports: fanAngleDeg,
+        topRadius: topRadius,
+        topChord: topChord
+    });
 }
 
-function displayResults(ribs) {
+function displayResults(ribs, layout) {
     const resultsDiv = document.getElementById('results');
     const tbody = document.querySelector('#results-table tbody');
 
@@ -99,6 +117,11 @@ function displayResults(ribs) {
         alert('No ribs fit within the specified dimensions.');
         return;
     }
+
+    // Display layout info
+    document.getElementById('angle-between-supports').textContent = `${layout.angleBetweenSupports.toFixed(1)}°`;
+    document.getElementById('top-radius').textContent = formatInches(layout.topRadius);
+    document.getElementById('top-chord').textContent = formatInches(layout.topChord);
 
     // Add rows
     ribs.forEach(rib => {
