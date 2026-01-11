@@ -10,12 +10,15 @@
 <body>
     <nav><p><a href="../index.html">blog</a> | <a href="../tools.html">tools</a></p></nav>
 
-    <div class="container">
+    <div class="page-header">
         <h1>Skate Bowl Rib Calculator</h1>
         <p class="description">Calculate rib lengths and compound miter angles for wooden skate bowl construction.</p>
+    </div>
 
-        <form id="calculator-form">
-            <div class="input-group">
+    <div class="main-layout">
+        <div class="left-column">
+            <form id="calculator-form">
+            <div class="input-group" data-highlight="radius">
                 <label for="radius">Radius</label>
                 <div class="input-with-unit">
                     <input type="number" id="radius" step="0.1" value="8" required>
@@ -26,7 +29,7 @@
                 </div>
             </div>
 
-            <div class="input-group">
+            <div class="input-group" data-highlight="corner-angle">
                 <label for="corner-angle">Corner Angle</label>
                 <div class="input-with-unit">
                     <input type="number" id="corner-angle" step="1" value="90" min="1" max="180" required>
@@ -34,14 +37,14 @@
                 </div>
             </div>
 
-            <div class="input-group">
+            <div class="input-group" data-highlight="supports">
                 <label for="num-sections">Number of Sections</label>
                 <div class="input-with-unit">
                     <input type="number" id="num-sections" step="1" value="6" min="1" max="20" required>
                 </div>
             </div>
 
-            <div class="input-group">
+            <div class="input-group" data-highlight="ribs">
                 <label for="rib-spacing">Rib Spacing (along arc)</label>
                 <div class="input-with-unit">
                     <input type="number" id="rib-spacing" step="0.5" value="8" required>
@@ -49,7 +52,7 @@
                 </div>
             </div>
 
-            <div class="input-group">
+            <div class="input-group" data-highlight="height">
                 <label for="max-height">Maximum Height</label>
                 <div class="input-with-unit">
                     <input type="number" id="max-height" step="0.1" value="6" required>
@@ -82,13 +85,13 @@
         <div id="results" class="results hidden">
             <h2>Corner Layout</h2>
             <dl id="layout-info">
-                <dt>Angle between supports</dt>
-                <dd id="angle-between-supports"></dd>
-                <dt>Top radius</dt>
-                <dd id="top-radius"></dd>
+                <dt data-highlight="supports">Angle between supports</dt>
+                <dd id="angle-between-supports" data-highlight="supports"></dd>
+                <dt data-highlight="top-radius">Top radius</dt>
+                <dd id="top-radius" data-highlight="top-radius"></dd>
                 <dd class="note">Use this radius to cut your deck. This should also be the horizontal distance from the coping to where everything meets at the bottom.</dd>
-                <dt>Top straight line distance</dt>
-                <dd id="top-chord"></dd>
+                <dt data-highlight="chord">Top straight line distance</dt>
+                <dd id="top-chord" data-highlight="chord"></dd>
                 <dd class="note">Use this measurement to make sure your corner angle is accurate. You can measure at the bottom from lines straight down from the coping.</dd>
             </dl>
 
@@ -108,6 +111,60 @@
             </table>
         </div>
     </div>
+
+    <div class="right-column">
+        <div id="visualization" class="visualization">
+            <div class="viz-container">
+                <h3>Side View</h3>
+                <svg id="side-view" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                    <!-- Ground line -->
+                    <line id="viz-ground" x1="10" y1="190" x2="190" y2="190" stroke="#666" stroke-width="1"/>
+
+                    <!-- Quarter circle arc -->
+                    <path id="viz-arc" fill="none" stroke="#333" stroke-width="2"/>
+
+                    <!-- Radius line -->
+                    <line id="viz-radius" stroke="#007bff" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+                    <!-- Height line -->
+                    <line id="viz-height" stroke="#28a745" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+                    <!-- Top radius (horizontal) line -->
+                    <line id="viz-top-radius" stroke="#dc3545" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+                    <!-- Ribs -->
+                    <g id="viz-ribs"></g>
+
+                    <!-- Labels -->
+                    <text id="viz-radius-label" font-size="10" fill="#007bff">R</text>
+                    <text id="viz-height-label" font-size="10" fill="#28a745">H</text>
+                </svg>
+            </div>
+            <div class="viz-container">
+                <h3>Top View</h3>
+                <svg id="top-view" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                    <!-- Support lines (fan-out) -->
+                    <g id="viz-supports"></g>
+
+                    <!-- Top arc -->
+                    <path id="viz-top-arc" fill="none" stroke="#333" stroke-width="2"/>
+
+                    <!-- Top chord -->
+                    <line id="viz-chord" stroke="#6f42c1" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+                    <!-- Corner angle arc -->
+                    <path id="viz-corner-angle" fill="none" stroke="#fd7e14" stroke-width="1.5"/>
+
+                    <!-- Toe point -->
+                    <circle id="viz-toe" cx="100" cy="190" r="3" fill="#333"/>
+
+                    <!-- Labels -->
+                    <text id="viz-angle-label" font-size="10" fill="#fd7e14"></text>
+                </svg>
+            </div>
+        </div>
+    </div>
+</div>
 
     <script src="script.js"></script>
 </body>
