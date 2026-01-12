@@ -331,6 +331,174 @@ function updateVisualization(geo, ribs) {
     vizAngleLabel.setAttribute('x', topOriginX - 15);
     vizAngleLabel.setAttribute('y', topOriginY - angleArcRadius - 5);
     vizAngleLabel.textContent = `${Math.round(geo.cornerAngleRad * 180 / Math.PI)}°`;
+
+    // Isometric 3D view
+    updateIsometricView(geo, ribs);
+}
+
+function updateIsometricView(geo, ribs) {
+    // Isometric projection - view from front-left, looking at the curved ramp surface
+    // We want to see the curve rising up from the toe
+
+    // The bowl geometry:
+    // - Toe is at origin (0,0,0)
+    // - Supports fan out in the XZ plane
+    // - Height (Y) goes up
+    // - With 90° corner, middle of bowl faces +Z direction
+
+    // We'll view from: front-left-below, looking toward the bowl
+    // This means looking from negative Z, negative X, and seeing Y go up
+
+    const project3D = (x, y, z) => {
+        // Dimetric-style projection for better depth perception
+        // Rotate model around Y, then tilt to view from above
+        const angleY = Math.PI / 5 + Math.PI / 2;  // Rotate around vertical axis (+90°)
+        const angleX = Math.PI / 4;  // Tilt to view from above (45°)
+
+        // Rotate around Y axis
+        const x1 = x * Math.cos(angleY) - z * Math.sin(angleY);
+        const z1 = x * Math.sin(angleY) + z * Math.cos(angleY);
+        const y1 = y;
+
+        // Rotate around X axis (tilt forward)
+        const y2 = y1 * Math.cos(angleX) - z1 * Math.sin(angleX);
+        const z2 = y1 * Math.sin(angleX) + z1 * Math.cos(angleX);
+        const x2 = x1;
+
+        // Project to 2D (orthographic)
+        return {
+            x: x2,
+            y: -y2  // Flip Y for screen coordinates
+        };
+    };
+
+    // Scale and offset to fit in viewBox
+    const isoScale = 1.3;
+    const offsetX = 125;
+    const offsetY = 150;
+
+    const project = (x, y, z) => {
+        const p = project3D(x, y, z);
+        return { x: p.x * isoScale + offsetX, y: p.y * isoScale + offsetY };
+    };
+
+    // Generate points along each support's curve
+    const numCurvePoints = 20;
+    const supportCurves = [];
+    const halfCorner = geo.cornerAngleRad / 2;
+
+    for (let s = 0; s <= geo.numSections; s++) {
+        const angle = -halfCorner + (s * geo.fanAngleRad);
+        const curve = [];
+
+        for (let i = 0; i <= numCurvePoints; i++) {
+            const alpha = (i / numCurvePoints) * geo.alphaMax;
+            const height = geo.radius * (1 - Math.cos(alpha));
+            const horizDist = geo.radius * Math.sin(alpha);
+
+            // 3D position: x = horizDist * sin(angle), z = horizDist * cos(angle), y = height
+            const x = horizDist * Math.sin(angle);
+            const z = horizDist * Math.cos(angle);
+            const y = height;
+
+            curve.push({ x, y, z, alpha });
+        }
+        supportCurves.push(curve);
+    }
+
+    // Draw bowl surface (filled polygons between supports)
+    const vizSurface = document.getElementById('viz-iso-surface');
+    vizSurface.innerHTML = '';
+
+    for (let s = 0; s < geo.numSections; s++) {
+        const curve1 = supportCurves[s];
+        const curve2 = supportCurves[s + 1];
+
+        // Create a polygon for this section
+        const points = [];
+
+        // Go up curve1
+        for (let i = 0; i <= numCurvePoints; i++) {
+            const p = project(curve1[i].x, curve1[i].y, curve1[i].z);
+            points.push(`${p.x},${p.y}`);
+        }
+
+        // Go down curve2
+        for (let i = numCurvePoints; i >= 0; i--) {
+            const p = project(curve2[i].x, curve2[i].y, curve2[i].z);
+            points.push(`${p.x},${p.y}`);
+        }
+
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', points.join(' '));
+        polygon.setAttribute('fill', `hsl(200, 20%, ${75 - s * 3}%)`);
+        polygon.setAttribute('stroke', '#999');
+        polygon.setAttribute('stroke-width', '0.5');
+        vizSurface.appendChild(polygon);
+    }
+
+    // Draw support frame lines
+    const vizIsoSupports = document.getElementById('viz-iso-supports');
+    vizIsoSupports.innerHTML = '';
+
+    supportCurves.forEach((curve, idx) => {
+        const pathPoints = curve.map(pt => {
+            const p = project(pt.x, pt.y, pt.z);
+            return `${p.x},${p.y}`;
+        });
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        path.setAttribute('points', pathPoints.join(' '));
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', '#666');
+        path.setAttribute('stroke-width', '1.5');
+        vizIsoSupports.appendChild(path);
+    });
+
+    // Draw ribs
+    const vizIsoRibs = document.getElementById('viz-iso-ribs');
+    vizIsoRibs.innerHTML = '';
+
+    ribs.forEach(rib => {
+        const alpha = rib.arcFromBottom / geo.radius;
+
+        for (let s = 0; s < geo.numSections; s++) {
+            const angle1 = -halfCorner + (s * geo.fanAngleRad);
+            const angle2 = -halfCorner + ((s + 1) * geo.fanAngleRad);
+
+            const horizDist = geo.radius * Math.sin(alpha);
+            const height = geo.radius * (1 - Math.cos(alpha));
+
+            const x1 = horizDist * Math.sin(angle1);
+            const z1 = horizDist * Math.cos(angle1);
+            const x2 = horizDist * Math.sin(angle2);
+            const z2 = horizDist * Math.cos(angle2);
+
+            const p1 = project(x1, height, z1);
+            const p2 = project(x2, height, z2);
+
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', p1.x);
+            line.setAttribute('y1', p1.y);
+            line.setAttribute('x2', p2.x);
+            line.setAttribute('y2', p2.y);
+            line.setAttribute('stroke', '#e83e8c');
+            line.setAttribute('stroke-width', '1.5');
+            line.setAttribute('class', `iso-rib-${rib.number}`);
+            vizIsoRibs.appendChild(line);
+        }
+    });
+
+    // Draw deck edge (top arc)
+    const vizIsoDeck = document.getElementById('viz-iso-deck');
+    const deckPoints = [];
+    for (let s = 0; s <= geo.numSections; s++) {
+        const curve = supportCurves[s];
+        const topPt = curve[curve.length - 1];
+        const p = project(topPt.x, topPt.y, topPt.z);
+        deckPoints.push(`${p.x},${p.y}`);
+    }
+    vizIsoDeck.setAttribute('d', 'M ' + deckPoints.join(' L '));
 }
 
 // Rib row hover highlighting
@@ -338,20 +506,32 @@ function setupRibRowHighlighting() {
     document.querySelectorAll('#results-table tbody tr').forEach(row => {
         row.addEventListener('mouseenter', () => {
             const ribNumber = row.dataset.ribNumber;
+            // Highlight dot in side view
             const dot = document.getElementById(`viz-rib-${ribNumber}`);
             if (dot) {
                 dot.setAttribute('r', '6');
                 dot.setAttribute('fill', '#ff0066');
             }
+            // Highlight lines in isometric view
+            document.querySelectorAll(`.iso-rib-${ribNumber}`).forEach(line => {
+                line.setAttribute('stroke', '#ff0066');
+                line.setAttribute('stroke-width', '3');
+            });
         });
 
         row.addEventListener('mouseleave', () => {
             const ribNumber = row.dataset.ribNumber;
+            // Reset dot in side view
             const dot = document.getElementById(`viz-rib-${ribNumber}`);
             if (dot) {
                 dot.setAttribute('r', '3');
                 dot.setAttribute('fill', '#e83e8c');
             }
+            // Reset lines in isometric view
+            document.querySelectorAll(`.iso-rib-${ribNumber}`).forEach(line => {
+                line.setAttribute('stroke', '#e83e8c');
+                line.setAttribute('stroke-width', '1.5');
+            });
         });
     });
 }
@@ -360,18 +540,21 @@ function setupRibRowHighlighting() {
 function setupHighlighting() {
     const sideView = document.getElementById('side-view');
     const topView = document.getElementById('top-view');
+    const isoView = document.getElementById('iso-view');
 
     document.querySelectorAll('[data-highlight]').forEach(el => {
         el.addEventListener('mouseenter', () => {
             const highlightType = el.dataset.highlight;
             sideView.classList.add(`highlight-${highlightType}`);
             topView.classList.add(`highlight-${highlightType}`);
+            isoView.classList.add(`highlight-${highlightType}`);
         });
 
         el.addEventListener('mouseleave', () => {
             const highlightType = el.dataset.highlight;
             sideView.classList.remove(`highlight-${highlightType}`);
             topView.classList.remove(`highlight-${highlightType}`);
+            isoView.classList.remove(`highlight-${highlightType}`);
         });
     });
 }
