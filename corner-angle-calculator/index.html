@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Corner Angle Calculator</title>
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav><p><a href="../index.html">blog</a> | <a href="../tools.html">tools</a></p></nav>
+
+    <div class="page-header">
+        <h1>Corner Angle Calculator</h1>
+        <p class="description">Calculate the corner angle from physical measurements. Useful when you can't easily measure the angle directly.</p>
+    </div>
+
+    <div class="main-layout">
+        <div class="left-column">
+            <form id="calculator-form">
+            <div class="input-group" data-highlight="radius">
+                <label for="radius">Transition Radius</label>
+                <div class="input-with-unit">
+                    <input type="number" id="radius" step="0.1" value="8" required>
+                    <select id="radius-unit">
+                        <option value="ft">ft</option>
+                        <option value="in">in</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="input-group" data-highlight="height">
+                <label for="height">Transition Height</label>
+                <div class="input-with-unit">
+                    <input type="number" id="height" step="0.1" value="6" required>
+                    <select id="height-unit">
+                        <option value="ft">ft</option>
+                        <option value="in">in</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="input-group" data-highlight="chord">
+                <label for="chord">Top Straight Line Distance</label>
+                <div class="input-with-unit">
+                    <input type="number" id="chord" step="0.1" value="72" required>
+                    <span class="unit">inches</span>
+                </div>
+                <p class="input-note">Measure across the top of the corner, from one coping end to the other.</p>
+            </div>
+
+            <button type="submit">Calculate</button>
+        </form>
+
+        <div id="results" class="results hidden">
+            <h2>Results</h2>
+            <dl id="layout-info">
+                <dt data-highlight="top-radius">Top Radius</dt>
+                <dd id="top-radius" data-highlight="top-radius"></dd>
+                <dd class="note">The horizontal distance from the corner's center point to the coping.</dd>
+
+                <dt data-highlight="corner-angle">Corner Angle</dt>
+                <dd id="corner-angle" data-highlight="corner-angle"></dd>
+                <dd class="note">Use this value in the <a href="../skate-bowl-calculator/">Rib Calculator</a>.</dd>
+            </dl>
+        </div>
+    </div>
+
+    <div class="right-column">
+        <div id="visualization" class="visualization">
+            <div class="viz-container">
+                <h3>Side View</h3>
+                <svg id="side-view" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                    <!-- Ground line -->
+                    <line id="viz-ground" x1="10" y1="190" x2="190" y2="190" stroke="#666" stroke-width="1"/>
+
+                    <!-- Quarter circle arc -->
+                    <path id="viz-arc" fill="none" stroke="#333" stroke-width="2"/>
+
+                    <!-- Radius line -->
+                    <line id="viz-radius" stroke="#007bff" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+                    <!-- Height line -->
+                    <line id="viz-height" stroke="#28a745" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+                    <!-- Top radius (horizontal) line -->
+                    <line id="viz-top-radius" stroke="#dc3545" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+                    <!-- Labels -->
+                    <text id="viz-radius-label" font-size="10" fill="#007bff">R</text>
+                    <text id="viz-height-label" font-size="10" fill="#28a745">H</text>
+                </svg>
+            </div>
+            <div class="viz-container">
+                <h3>Top View</h3>
+                <svg id="top-view" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                    <!-- Top arc -->
+                    <path id="viz-top-arc" fill="none" stroke="#333" stroke-width="2"/>
+
+                    <!-- Top chord -->
+                    <line id="viz-chord" stroke="#6f42c1" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+                    <!-- Corner angle arc -->
+                    <path id="viz-corner-angle" fill="none" stroke="#fd7e14" stroke-width="1.5"/>
+
+                    <!-- Toe point -->
+                    <circle id="viz-toe" cx="100" cy="190" r="3" fill="#333"/>
+
+                    <!-- Edge lines -->
+                    <line id="viz-edge-left" stroke="#999" stroke-width="1"/>
+                    <line id="viz-edge-right" stroke="#999" stroke-width="1"/>
+
+                    <!-- Labels -->
+                    <text id="viz-angle-label" font-size="10" fill="#fd7e14"></text>
+                </svg>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <script src="script.js"></script>
+</body>
+</html>

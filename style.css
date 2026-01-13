@@ -89,3 +89,8 @@ aside {
     background-image: url("./skate-bowl-calculator/bowl-ribs-banner.jpg");
     background-position: center 40%;
 }
+
+#corner-calc {
+    background-image: url("./corner-angle-calculator/bowl-ribs-2.jpg");
+    background-position: center;
+}
