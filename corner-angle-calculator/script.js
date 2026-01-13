@@ -145,8 +145,8 @@ function updateVisualization(radius, height, topRadius, cornerAngle) {
 
     // Radius label
     const radiusLabel = document.getElementById('viz-radius-label');
-    radiusLabel.setAttribute('x', (centerX + midArcX) / 2 - 10);
-    radiusLabel.setAttribute('y', (centerY + midArcY) / 2);
+    radiusLabel.setAttribute('x', (centerX + midArcX) / 2 - 12);
+    radiusLabel.setAttribute('y', (centerY + midArcY) / 2 + 8);
 
     // Height line (vertical from ground to top of ramp)
     const heightLine = document.getElementById('viz-height');

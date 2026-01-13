@@ -225,8 +225,8 @@ function updateVisualization(geo, ribs) {
 
     // Radius label
     const vizRadiusLabel = document.getElementById('viz-radius-label');
-    vizRadiusLabel.setAttribute('x', (centerX + midArcX) / 2 - 10);
-    vizRadiusLabel.setAttribute('y', (centerY + midArcY) / 2);
+    vizRadiusLabel.setAttribute('x', (centerX + midArcX) / 2 - 12);
+    vizRadiusLabel.setAttribute('y', (centerY + midArcY) / 2 + 8);
 
     // Height line (vertical from ground to top of ramp)
     const vizHeight = document.getElementById('viz-height');
