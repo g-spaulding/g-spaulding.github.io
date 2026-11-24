@@ -128,6 +128,15 @@
                     </div>
 
                     <div class="input-group">
+                        <label for="rib-style">Rib Style</label>
+                        <select id="rib-style">
+                            <option value="straight">Straight</option>
+                            <option value="curved">Curved (cut straight, then cup out the skin face)</option>
+                        </select>
+                        <p class="input-note">Cupping the skin face to the right radius gets rid of the flat spots. Fewer bays are then fine.</p>
+                    </div>
+
+                    <div class="input-group">
                         <label for="saw-setup">Saw Setup</label>
                         <select id="saw-setup">
                             <option value="flat">Rib lying flat (wide face on the table)</option>
@@ -167,7 +176,11 @@
 
                     <dt data-highlight="facet">Flat spot depth</dt>
                     <dd id="facet-depth" data-highlight="facet"></dd>
-                    <dd class="note">The deepest gap between a straight rib and the true round surface, at the middle of each bay at the coping. Add sections to shrink it.</dd>
+                    <dd class="note" id="facet-note"></dd>
+
+                    <dt class="cup-sphere-only">Cup radius</dt>
+                    <dd id="cup-radius" class="cup-sphere-only"></dd>
+                    <dd class="note cup-sphere-only">In a tight corner every rib is cupped to the transition radius. A rib cut to this radius through the support marks sits exactly on the sphere.</dd>
                 </dl>
 
                 <div class="results-header">
@@ -198,6 +211,9 @@
                     <p>The end cuts are the vertical faces of the supports. For a rib on a surface sloped at angle <var>a</var>, lying flat on the saw:</p>
                     <p class="formula">miter = atan(tan(<var>φ</var>/2)·sin <var>a</var>)  bevel = asin(sin(<var>φ</var>/2)·cos <var>a</var>)</p>
                     <p>On edge, the roles swap: miter = atan(tan(<var>φ</var>/2)·cos <var>a</var>), bevel = asin(sin(<var>φ</var>/2)·sin <var>a</var>). <var>a</var> is taken at the middle of the rib's face.</p>
+                    <p><b>Curved ribs.</b> A rib is cut straight first, using the length and angles above, and then its skin face is cupped. Its skin face lies in the plane that contains the rib and the line perpendicular to the skin. The surface's curve in that plane has a radius equal to the distance along that perpendicular line from the skin to the corner's vertical axis:</p>
+                    <p class="formula">cup radius ρ = <var>R</var> + <var>r₀</var> / sin <var>a</var>  cup depth = ρ − √(ρ² − (length/2)²)</p>
+                    <p>For a sphere (<var>r₀</var> = 0) this is just <var>R</var> for every rib. For a torus it grows toward the floor and equals the coping radius once the wall is vertical. The arc stays within a few thousandths of an inch of the true torus across a bay.</p>
                 </details>
             </div>
         </div>

@@ -51,7 +51,8 @@ function readInputs() {
         depth: num('rib-depth'),
         s: num('support-thickness'),
         endSupports: $('end-supports').value,
-        saw: $('saw-setup').value
+        saw: $('saw-setup').value,
+        curved: $('rib-style').value === 'curved'
     };
 }
 
@@ -142,7 +143,12 @@ function calculate() {
         const lengths = groups.map(g => lengthAt(pb.u, g.off));
         if (Math.min(...lengths) < minLen) { truncated = true; break; }
         const ang = cutAngles(h, pm.a, i.saw);
+        // Cup radius: distance along the skin normal to the corner axis (R for a sphere)
+        const cupR = r0 > 0 ? i.R + r0 / Math.max(Math.sin(pm.a), 1e-9) : i.R;
+        const halfL = Math.max(...lengths) / 2;
+        const cupDepth = cupR - Math.sqrt(Math.max(0, cupR * cupR - halfL * halfL));
         ribs.push({
+            cupR, cupDepth,
             number: ribs.length + 1,
             dft, sBottom,
             u: pb.u, y: pb.y, a: pm.a,
@@ -185,7 +191,15 @@ function displayResults(r) {
     $('toe-radius').innerHTML = formatLong(r.r0);
     $('top-chord').innerHTML = formatLong(r.topChord);
     $('support-spacing').innerHTML = formatLong(r.supportSpacing);
-    $('facet-depth').textContent = formatInches(r.facet);
+    if (i.curved) {
+        $('facet-depth').textContent = 'None';
+        $('facet-note').textContent = `The ribs are cupped to the surface, so the skin follows the true curve. (Straight ribs would leave up to ${formatInches(r.facet)} at the middle of each bay at the coping.)`;
+    } else {
+        $('facet-depth').textContent = formatInches(r.facet);
+        $('facet-note').textContent = 'The deepest gap between a straight rib and the true round surface, at the middle of each bay at the coping. Add sections or cup the ribs to shrink it.';
+    }
+    $('cup-radius').innerHTML = formatLong(i.R);
+    document.querySelectorAll('.cup-sphere-only').forEach(n => n.classList.toggle('hidden', !(i.curved && r.r0 === 0)));
 
     if (i.n === 1 || i.s === 0) {
         $('support-trim').textContent = 'None';
@@ -212,6 +226,8 @@ function displayResults(r) {
     });
     th('Miter');
     th('Bevel');
+    if (i.curved && r.r0 > 0) th('Cup radius');
+    if (i.curved) th('Cup depth');
 
     const tbody = document.querySelector('#results-table tbody');
     tbody.innerHTML = '';
@@ -225,7 +241,9 @@ function displayResults(r) {
             `<span class="col-optional-inner">${formatInches(rib.y)}</span>`,
             ...rib.lengths.map(L => `<b>${formatInches(L)}</b>`),
             formatDeg(rib.miter),
-            formatDeg(rib.bevel)
+            formatDeg(rib.bevel),
+            ...(i.curved && r.r0 > 0 ? [formatInches(rib.cupR)] : []),
+            ...(i.curved ? [formatInches(rib.cupDepth)] : [])
         ];
         row.innerHTML = cells.map((c, idx) => `<td${idx === 2 ? ' class="col-optional"' : ''}>${c}</td>`).join('');
         row.addEventListener('mouseenter', () => setActiveRib(rib.number));
@@ -246,6 +264,11 @@ function displayResults(r) {
         `Lengths are short-point measurements along the rib's lower skin-side edge, which lands exactly on the support profile at both ends. ` +
         `${sawWord}. Both ends get the same miter and bevel, mirrored. ` +
         `${ribCount} ribs, about ${(stock / 12).toFixed(0)} linear ft of rib stock before waste.`;
+    if (i.curved) {
+        note += ` Cut each rib straight first and check the fit, then cup out the middle of the skin face to the cup radius. Cup depth is how much to remove at the center; the ends stay put.`;
+        const maxCup = Math.max(...r.ribs.map(x => x.cupDepth));
+        if (maxCup > i.depth / 2) note += ` The deepest cup (${formatInches(maxCup)}) is more than half the rib depth, so consider deeper stock or more bays.`;
+    }
     if (r.truncated) note += ' Ribs stop where they would get too short to fasten. Fill in below that point as you like.';
     $('cut-list-note').textContent = note;
 }
@@ -381,11 +404,12 @@ function drawTop(r) {
         el('line', { x1: a[0], y1: a[1], x2: b[0], y2: b[1], class: 'support' }, sg);
     }
 
-    // Ribs as straight chords in each bay — shows the faceting
+    // Ribs: straight chords in each bay (shows the faceting), or arcs when cupped
     const rg = el('g', { class: 'ribs' }, svg);
+    const sub = i.curved ? 8 : 1;
     r.ribs.forEach(rib => {
         const list = [];
-        for (let k = 0; k <= i.n; k++) list.push(P(XY(rib.u, -halfT + k * phi)));
+        for (let k = 0; k <= i.n * sub; k++) list.push(P(XY(rib.u, -halfT + k * phi / sub)));
         el('polyline', { points: pts(list), class: 'rib-line', 'data-rib': rib.number }, rg);
     });
 
@@ -445,21 +469,20 @@ function draw3D(r) {
         scene.push({ type: 'poly', pts: outline.map(([u, y]) => W(u, y, psi)), cls: 'ply3d', shade: [38, 45, 35, 72] });
     }
 
-    // Ribs (as the skin-side edge, straight across each bay)
+    // Ribs (as the skin-side edge): straight across each bay, or following the surface when cupped
+    const sub = i.curved ? Math.max(2, Math.ceil(phi / (4 * DEG))) : 1;
     r.ribs.forEach(rib => {
         for (let k = 0; k < i.n; k++) {
-            scene.push({
-                type: 'line', cls: 'rib3d', rib: rib.number,
-                pts: [W(rib.u, rib.y, -halfT + k * phi), W(rib.u, rib.y, -halfT + (k + 1) * phi)],
-                bias: -0.01
-            });
+            const list = [];
+            for (let m = 0; m <= sub; m++) list.push(W(rib.u, rib.y, -halfT + (k + m / sub) * phi));
+            scene.push({ type: 'line', cls: 'rib3d', rib: rib.number, pts: list, bias: -0.01 });
         }
     });
 
-    // Skin: flat facets between supports
+    // Skin: flat facets between supports, or the true curved surface when ribs are cupped
     if (showSkin) {
-        for (let k = 0; k < i.n; k++) {
-            const a = -halfT + k * phi, b = a + phi;
+        for (let k = 0; k < i.n * sub; k++) {
+            const a = -halfT + k * phi / sub, b = a + phi / sub;
             for (let j = 0; j < samples.length - 1; j++) {
                 const p = samples[j], q = samples[j + 1];
                 scene.push({ type: 'poly', cls: 'skin3d', shade: [205, 35, 30, 78], pts: [W(p.u, p.y, a), W(q.u, q.y, a), W(q.u, q.y, b), W(p.u, p.y, b)], bias: -0.02 });
@@ -517,6 +540,12 @@ function drawRibDetail(r, n) {
     el('line', { x1: x0, y1: yFence, x2: x0 + Lpx, y2: yFence, class: 'ref-edge' }, svg);
     el('text', { x: 160, y: yFence + 14, class: 'detail-label strong', 'text-anchor': 'middle', text: `${formatInches(ref)} measured here` }, svg);
     el('text', { x: 160, y: yFar - 6, class: 'detail-label', 'text-anchor': 'middle', text: `${formatInches(far)} on the far edge` }, svg);
+    // Cupped skin edge (visible in plan only when the skin edge is against the fence)
+    if (i.curved && flat) {
+        const sag = Math.min(Wpx * 0.6, Math.max(4, rib.cupDepth * Wpx / visW));
+        el('path', { d: `M ${x0} ${yFence} Q 160 ${yFence - 2 * sag} ${x0 + Lpx} ${yFence}`, class: 'cup-line' }, svg);
+        el('text', { x: 160, y: yFence - sag - 4, class: 'detail-label', 'text-anchor': 'middle', text: `cup ${formatInches(rib.cupDepth)} deep` }, svg);
+    }
     // Square reference + miter angle at left end
     el('line', { x1: x0, y1: yFence, x2: x0, y2: yFar - 8, class: 'square-ref' }, svg);
     el('text', { x: x0 + 4, y: yFar - 12, class: 'detail-label', 'text-anchor': 'start', text: `miter ${formatDeg(rib.miter)}` }, svg);
@@ -528,5 +557,6 @@ function drawRibDetail(r, n) {
     $('rib-detail-text').textContent =
         `Rib ${rib.number} sits ${formatInches(rib.dft)} down the curve (${formatInches(rib.y)} off the floor), with its skin face sloped ${formatDeg(rib.a, 0)}. ` +
         `Cut ${lens}. ${flat ? 'Lay it flat on the saw with the skin edge against the fence.' : 'Stand it on its skin face with the lower face against the fence.'} ` +
-        `Miter ${formatDeg(rib.miter)}, bevel ${formatDeg(rib.bevel)}. Cut the other end mirrored.`;
+        `Miter ${formatDeg(rib.miter)}, bevel ${formatDeg(rib.bevel)}. Cut the other end mirrored.` +
+        (i.curved ? ` Then cup the skin face to a ${formatInches(rib.cupR)} radius, ${formatInches(rib.cupDepth)} deep at the center.` : '');
 }

@@ -508,6 +508,7 @@ button.secondary:hover { border-color: #007bff; color: #007bff; }
 .rib-detail .board { fill: var(--viz-ply); stroke: var(--viz-ply-edge); stroke-width: 1; }
 .rib-detail .ref-edge { stroke: var(--c-rib-active); stroke-width: 3; }
 .rib-detail .fence { stroke: var(--viz-muted); stroke-width: 4; opacity: 0.5; }
+.rib-detail .cup-line { fill: none; stroke: var(--c-rib-active); stroke-width: 1.5; stroke-dasharray: 4,2; }
 .rib-detail .square-ref { stroke: var(--viz-muted); stroke-dasharray: 2,2; }
 .rib-detail text { fill: var(--viz-line); }
 .rib-detail .strong { font-weight: bold; fill: var(--c-rib-active); }
