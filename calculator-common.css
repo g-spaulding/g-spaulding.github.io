@@ -500,7 +500,7 @@ button.secondary:hover { border-color: #007bff; color: #007bff; }
 
 .rib-detail {
     width: 100%;
-    max-width: 480px;
+    max-width: 620px;
     display: block;
     background: var(--viz-bg);
     border: 1px solid var(--viz-border);
@@ -659,6 +659,28 @@ body.fs-locked { overflow: hidden; }
 .highlight-ribs .rib-solid { fill: var(--c-rib) !important; stroke: var(--c-rib) !important; }
 .highlight-supports .ply3d { fill: var(--c-support) !important; stroke: var(--c-support) !important; }
 .ply3d { fill-opacity: 1; }
+
+
+.rib-detail .saw-table { fill: var(--viz-floor); stroke: var(--viz-border); stroke-width: 0.6; }
+.rib-detail .saw-fence { fill: var(--viz-faint); stroke: var(--viz-muted); stroke-width: 0.6; }
+.rib-detail .board3d { stroke: var(--viz-ply-edge); stroke-width: 0.6; stroke-linejoin: round; }
+.rib-detail .hidden-edge { fill: none; stroke-dasharray: 4,2; stroke-width: 2; }
+.rib-detail .ext-line { fill: none; stroke: var(--viz-muted); stroke-width: 0.6; stroke-dasharray: 1.5,2; }
+.rib-detail .dim-line { fill: none; stroke: var(--c-rib-active); stroke-width: 1; }
+.rib-detail .cut-edge { fill: none; stroke: var(--c-angle); stroke-width: 1.6; }
+.rib-detail .angle-wedge { fill: var(--c-angle); fill-opacity: 0.35; stroke: none; }
+.rib-detail .square-ref { stroke: var(--viz-line) !important; stroke-width: 1; stroke-dasharray: 3,2; opacity: 0.8; }
+.rib-detail .angle-mark { fill: none; stroke: var(--c-angle); stroke-width: 1; }
+.rib-detail .angle-text { fill: var(--c-angle); font-weight: 600; }
+.rib-detail .cup-text { fill: var(--c-radius); font-weight: 600; }
+.rib-detail .cup-line { stroke: var(--c-radius) !important; }
+.rib-detail .cup-tick { fill: none; stroke: var(--c-radius); stroke-width: 1; }
+.rib-detail .panel-bg { fill: var(--viz-bg); }
+.rib-detail .panel-sep { stroke: var(--viz-border); stroke-width: 1; }
+.rib-detail .label-halo { paint-order: stroke; stroke: var(--viz-bg); stroke-width: 3px; stroke-linejoin: round; }
+.rib-detail .ref-dot { fill: var(--c-rib-active); }
+.rib-detail .scale-bar { fill: none; stroke: var(--viz-line); stroke-width: 1.5; }
+.rib-detail .square-ref { fill: none; }
 
 /* Dark mode support - must come last to override base styles */
 @media (prefers-color-scheme: dark) {

@@ -276,8 +276,8 @@ function displayResults(r) {
 
     const ribCount = r.ribs.length * i.n;
     const sawWord = i.saw === 'edge'
-        ? 'Stand the rib on its skin face, with the lower face against the fence'
-        : 'Lay the rib flat, with its skin edge against the fence';
+        ? 'Stand the rib on its skin face, with the lower face toward you'
+        : 'Lay the rib flat, with its skin edge toward you';
     let note = `Distances are measured along the curved edge of the support, down from the top, to the lower edge of each rib. Height is the same point measured straight up from the floor. ` +
         `Lengths are short-point measurements along the rib's lower skin-side edge, which lands exactly on the support profile at both ends. ` +
         `${sawWord}. Both ends get the same miter and bevel, mirrored. ` +
@@ -552,43 +552,15 @@ function drawRibDetail(r, n) {
     if (!rib) return;
     const svg = $('rib-detail');
     clear(svg);
-    const { i, h } = r;
+    const { i } = r;
     const flat = i.saw !== 'edge';
-    const visW = flat ? i.depth : i.t; // width of the face lying on the saw table
-    // How much closer to the corner center the far edge of the table face is than the reference edge.
-    // Negative: the far edge is further out, so it is longer. The reference edge is always the short point.
-    const shift = flat ? -i.depth * Math.sin(rib.a) : -i.t * Math.cos(rib.a);
-    const ref = rib.lengths[0];
-    const far = ref - 2 * shift * Math.tan(h);
-
-    // Schematic: true angles, exaggerated width
-    const Lpx = 230, Wpx = 46;
-    const dx = Wpx * Math.tan(rib.miter) * Math.sign(shift || 1);
-    const x0 = (320 - Lpx) / 2, yFence = 112, yFar = yFence - Wpx;
-    const board = [[x0, yFence], [x0 + Lpx, yFence], [x0 + Lpx - dx, yFar], [x0 + dx, yFar]];
-    el('line', { x1: 8, y1: yFence + 2, x2: 312, y2: yFence + 2, class: 'fence' }, svg);
-    el('text', { x: 312, y: yFence + 14, class: 'detail-label', 'text-anchor': 'end', text: 'fence' }, svg);
-    el('polygon', { points: pts(board), class: 'board' }, svg);
-    el('line', { x1: x0, y1: yFence, x2: x0 + Lpx, y2: yFence, class: 'ref-edge' }, svg);
-    el('text', { x: 160, y: yFence + 14, class: 'detail-label strong', 'text-anchor': 'middle', text: `${formatInches(ref)} measured here` }, svg);
-    el('text', { x: 160, y: yFar - 6, class: 'detail-label', 'text-anchor': 'middle', text: `${formatInches(far)} on the far edge` }, svg);
-    // Cupped skin edge (visible in plan only when the skin edge is against the fence)
-    if (i.curved && flat) {
-        const sag = Math.min(Wpx * 0.6, Math.max(4, rib.cupDepth * Wpx / visW));
-        el('path', { d: `M ${x0} ${yFence} Q 160 ${yFence - 2 * sag} ${x0 + Lpx} ${yFence}`, class: 'cup-line' }, svg);
-        el('text', { x: 160, y: yFence - sag - 4, class: 'detail-label', 'text-anchor': 'middle', text: `cup ${formatInches(rib.cupDepth)} deep` }, svg);
-    }
-    // Square reference + miter angle at left end
-    el('line', { x1: x0, y1: yFence, x2: x0, y2: yFar - 8, class: 'square-ref' }, svg);
-    el('text', { x: x0 + 4, y: yFar - 12, class: 'detail-label', 'text-anchor': 'start', text: `miter ${formatDeg(rib.miter)}` }, svg);
-    el('text', { x: 160, y: 22, class: 'detail-label', 'text-anchor': 'middle', text: `blade tilted ${formatDeg(rib.bevel)} (bevel)` }, svg);
-    el('text', { x: 160, y: 36, class: 'detail-label subtle', 'text-anchor': 'middle', text: 'not to scale · angles true' }, svg);
+    drawRibOnSaw(svg, r, rib, flat);
 
     $('rib-detail-title').textContent = `#${rib.number}`;
     const lens = r.groups.map((g, gi) => `${r.groups.length > 1 ? (g.end ? 'end bays' : 'middle bays') + ' ' : ''}${formatInches(rib.lengths[gi])} ×${g.count}`).join(', ');
     $('rib-detail-text').textContent =
         `Rib ${rib.number} sits ${formatInches(rib.dft)} down the curve (${formatInches(rib.y)} off the floor), with its skin face sloped ${formatDeg(rib.a, 0)}. ` +
-        `Cut ${lens}. ${flat ? 'Lay it flat on the saw with the skin edge against the fence.' : 'Stand it on its skin face with the lower face against the fence.'} ` +
+        `Cut ${lens}. ${flat ? 'Lay it flat on the saw with the skin edge toward you.' : 'Stand it on its skin face with the lower face toward you.'} ` +
         `Miter ${formatDeg(rib.miter)}, bevel ${formatDeg(rib.bevel)}. Cut the other end mirrored.` +
         (i.curved ? ` Then cup the skin face to a ${formatInches(rib.cupR)} radius, ${formatInches(rib.cupDepth)} deep at the center.` : '');
 }
@@ -778,17 +750,13 @@ function supportSolid(r, k) {
     return items;
 }
 
-// A rib in bay k as a solid: cross-section t × depth, ends cut on the support faces,
-// skin face cupped to the cup radius when curved ribs are selected.
-function ribSolid(r, rib, k) {
-    const { prof, i, theta, phi, h } = r;
-    const beta = -theta / 2 + (k + 0.5) * phi;            // bay bisector
-    const ex = [Math.cos(beta), 0, -Math.sin(beta)];       // along the rib
-    const ez = [Math.sin(beta), 0, Math.cos(beta)];        // outward, horizontal
+// Rib geometry for bay k in the bay's local frame [x, z, y]:
+// x along the rib, z outward along the bay bisector, y up.
+// rings[t][c] = corner c (skin-lower, skin-upper, back-upper, back-lower) at station t along the rib.
+function ribGeometry(r, rib, k, { cupped = r.i.curved, segs = 1 } = {}) {
+    const { prof, i, h } = r;
     const [o1, o2] = [k === 0 ? r.oEnd : r.oMid, k === i.n - 1 ? r.oEnd : r.oMid];
     const oAvg = (o1 + o2) / 2;
-
-    // Cross-section corners in the support plane: skin-lower, skin-upper, back-upper, back-lower
     const sec = ribSection(prof, rib, i.t, i.depth);
     const toZ = u => u * Math.cos(h) + oAvg * Math.sin(h);   // support-plane u -> distance along the bisector
     const corners = sec.map(([u, y]) => ({ z: toZ(u), y }));
@@ -796,26 +764,34 @@ function ribSolid(r, rib, k) {
     const xR = z => (z * Math.sin(h) - o2) / Math.cos(h);
     const xL = z => -(z * Math.sin(h) - o1) / Math.cos(h);
     const nOut = [Math.sin(rib.a), -Math.cos(rib.a)];      // away from the bowl, in (z, y)
-
-    const segs = i.curved ? 4 : 1;
     const ref = corners[0];
     const xMid = (xL(ref.z) + xR(ref.z)) / 2;
+    // Cup depth at x (returned even when the rings are built straight, for drawing the cup line)
     const cup = x => {
-        if (!i.curved) return 0;
         const dx = x - xMid;
         return Math.max(0, rib.cupDepth - (rib.cupR - Math.sqrt(Math.max(0, rib.cupR * rib.cupR - dx * dx))));
     };
-    const W = (x, z, y) => vadd(vadd(vmul(ex, x), vmul(ez, z)), [0, y, 0]);
-    // rings[t][c]: point of corner c at station t
     const rings = [];
     for (let t = 0; t <= segs; t++) {
         const f = t / segs;
         rings.push(corners.map((c, ci) => {
             const x = xL(c.z) + (xR(c.z) - xL(c.z)) * f;
-            const off = ci < 2 ? cup(x) : 0;
-            return W(x, c.z + nOut[0] * off, c.y + nOut[1] * off);
+            const off = cupped && ci < 2 ? cup(x) : 0;
+            return [x, c.z + nOut[0] * off, c.y + nOut[1] * off];
         }));
     }
+    return { rings, cup, xMid };
+}
+
+// A rib in bay k as a solid for the 3D views, cupped when curved ribs are selected.
+function ribSolid(r, rib, k) {
+    const { i, theta, phi } = r;
+    const beta = -theta / 2 + (k + 0.5) * phi;            // bay bisector
+    const ex = [Math.cos(beta), 0, -Math.sin(beta)];       // along the rib
+    const ez = [Math.sin(beta), 0, Math.cos(beta)];        // outward, horizontal
+    const segs = i.curved ? 4 : 1;
+    const W = ([x, z, y]) => vadd(vadd(vmul(ex, x), vmul(ez, z)), [0, y, 0]);
+    const rings = ribGeometry(r, rib, k, { segs }).rings.map(ring => ring.map(W));
     const inside = centroid(rings[Math.floor(segs / 2)]);
     const info = { kind: 'rib', rib, k };
     const shade = [28, 55, 48, 84];
@@ -831,3 +807,166 @@ function ribSolid(r, rib, k) {
     face(rings[segs].slice());
     return items;
 }
+
+// ---------- Rib detail: the rib on the saw table, to scale, seen from the operator's side ----------
+let clipSeq = 0;
+function drawRibOnSaw(svg, r, rib, flat) {
+    const { i } = r;
+    // Use a bay from the first group (middle bays when there are several); its length is the first column
+    const k = Math.max(0, r.bayGroup.indexOf(0));
+    const geo = ribGeometry(r, rib, k, { cupped: false });
+    const ca = Math.cos(rib.a), sa = Math.sin(rib.a);
+    // Saw frame: X along the fence, Y up off the table, Z away from the fence (toward the operator).
+    // The short-point edge (skin-lower) always faces the operator:
+    // Flat: lower wide face on the table, skin face toward you, back face against the fence.
+    // On edge: skin face on the table, lower wide face toward you, upper face against the fence.
+    // Z is flipped, so X is mirrored too to keep the frame right-handed.
+    const toSaw = ([x, z, y]) => {
+        const tT = z * ca + y * sa;          // up the ramp
+        const tN = z * sa - y * ca;          // into the rib, away from the skin
+        return flat ? [-x, tT, -tN] : [x, tN, -tT];
+    };
+    let rings = geo.rings.map(ring => ring.map(toSaw));
+    const all = rings.flat();
+    const min = [0, 1, 2].map(a => Math.min(...all.map(p => p[a])));
+    const max = [0, 1, 2].map(a => Math.max(...all.map(p => p[a])));
+    const cx = (min[0] + max[0]) / 2;
+    rings = rings.map(ring => ring.map(p => [p[0] - cx, p[1] - min[1], p[2] - min[2]]));
+    if (rings[0][0][0] > rings[1][0][0]) rings.reverse();   // rings[0] = left end
+    const boardH = max[1] - min[1], boardW = max[2] - min[2];
+    const xLo = Math.min(...rings.flat().map(p => p[0])), xHi = Math.max(...rings.flat().map(p => p[0]));
+    const cupAt = X => geo.cup(flat ? -(X + cx) : X + cx);
+
+    // Camera: above and in front (operator side), turned a little so the left end face shows
+    const camera = (yaw, pitch) => {
+        const cyaw = Math.cos(yaw), syaw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+        return {
+            cam: ([X, Y, Z]) => [X * cyaw + Z * syaw, Y * cp - (-X * syaw + Z * cyaw) * sp],
+            facing: n => n[1] * sp + (-n[0] * syaw + n[2] * cyaw) * cp > 1e-9
+        };
+    };
+
+    // Shared scene (saw coordinates)
+    const margin = Math.max(1.5, boardW * 0.7);
+    const fenceH = Math.max(boardH + 0.75, 3.5), fenceT = 1.5;
+    const tx0 = xLo - margin * 1.5, tx1 = xHi + margin * 1.5;
+    const table = [[tx0, 0, -fenceT], [tx1, 0, -fenceT], [tx1, 0, boardW + margin * 2.2], [tx0, 0, boardW + margin * 2.2]];
+    const fence = [
+        [[tx0, 0, 0], [tx1, 0, 0], [tx1, fenceH, 0], [tx0, fenceH, 0]],
+        [[tx0, fenceH, 0], [tx1, fenceH, 0], [tx1, fenceH, -fenceT], [tx0, fenceH, -fenceT]]
+    ];
+    const boardFaces = [];
+    for (let c = 0; c < 4; c++) {
+        const c2 = (c + 1) % 4;
+        boardFaces.push([rings[0][c], rings[1][c], rings[1][c2], rings[0][c2]]);
+    }
+    boardFaces.push(rings[0].slice(), rings[1].slice());
+    const inside = centroid(rings.flat());
+    const light = vnorm([-0.3, 1, 0.6]);
+    const shadeFill = n => `hsl(30 50% ${(42 + 40 * Math.max(0, vdot(n, light))).toFixed(0)}%)`;
+    const byY = ring => ring.map((p, c) => ({ p, c })).sort((a, b) => b.p[1] - a.p[1]);
+    const topL = byY(rings[0]).slice(0, 2).sort((a, b) => a.p[2] - b.p[2]);   // [fence side, front (short side)]
+    const botL = byY(rings[0]).slice(2).sort((a, b) => a.p[2] - b.p[2]);
+
+    // Draws the scene into a rectangle of the SVG, fitted to the given focus points; returns the projector
+    const VW = 360, VH = 250;
+    svg.setAttribute('viewBox', `0 0 ${VW} ${VH}`);
+    function panel(rect, focus, padX, padY, { cam, facing }) {
+        const f2 = focus.map(cam);
+        const bx0 = Math.min(...f2.map(p => p[0])), bx1 = Math.max(...f2.map(p => p[0]));
+        const by0 = Math.min(...f2.map(p => p[1])), by1 = Math.max(...f2.map(p => p[1]));
+        const scale = Math.min((rect.w - 2 * padX) / (bx1 - bx0), (rect.h - 2 * padY) / (by1 - by0));
+        const ox = rect.x + rect.w / 2 - (bx0 + bx1) / 2 * scale;
+        const oy = rect.y + rect.h / 2 + (by0 + by1) / 2 * scale;
+        const P = p => { const [a, b] = cam(p); return [ox + a * scale, oy - b * scale]; };
+        const path = (list, close) => 'M' + list.map(p => P(p).map(v => v.toFixed(1)).join(' ')).join('L') + (close ? 'Z' : '');
+        const id = `rib-clip-${++clipSeq}`;
+        const defs = el('defs', {}, svg);
+        el('rect', { x: rect.x, y: rect.y, width: rect.w, height: rect.h }, el('clipPath', { id }, defs));
+        const g = el('g', { 'clip-path': `url(#${id})` }, svg);
+        el('rect', { x: rect.x, y: rect.y, width: rect.w, height: rect.h, class: 'panel-bg' }, g);
+        el('path', { d: path(table, true), class: 'saw-table' }, g);
+        fence.forEach(f => el('path', { d: path(f, true), class: 'saw-fence' }, g));
+        boardFaces.forEach(f => {
+            const n = outwardNormal(f, inside);
+            if (facing(n)) el('path', { d: path(f, true), class: 'board3d', style: `fill: ${shadeFill(n)}` }, g);
+        });
+        return { P, path, g, scale };
+    }
+
+    // ---- Panel 1: the whole board, with its length and the cup ----
+    const dimZ = boardW + margin * 1.1;
+    const top = i.curved ? 30 : 20;
+    const v1 = panel({ x: 0, y: top, w: VW, h: 118 - top },
+        [...rings.flat(), [xLo, 0, dimZ + margin * 0.5], [xHi, 0, dimZ + margin * 0.5], [xLo, fenceH, -fenceT], [xHi, fenceH, -fenceT]], 14, 6,
+        camera(14 * DEG, 55 * DEG));
+    {
+        const { P, path, g } = v1;
+        const refA = rings[0][0], refB = rings[1][0];   // skin-lower edge: toward you, on the table
+        el('path', { d: path([refA, refB]), class: 'ref-edge' }, g);
+        [refA, refB].forEach(p => { const q = P(p); el('circle', { cx: q[0], cy: q[1], r: 2, class: 'ref-dot' }, g); });
+        el('path', { d: path([refA, [refA[0], 0, dimZ]]) + path([refB, [refB[0], 0, dimZ]]), class: 'ext-line' }, g);
+        el('path', { d: path([[refA[0], 0, dimZ], [refB[0], 0, dimZ]]), class: 'dim-line' }, g);
+        const mid = P([(refA[0] + refB[0]) / 2, 0, dimZ]);
+        el('text', { x: VW / 2, y: Math.max(mid[1] + 11, 114), class: 'detail-label strong label-halo', 'text-anchor': 'middle', text: `${formatInches(rib.lengths[0])} short point, the edge toward you on the table` }, svg);
+        if (i.curved) {
+            // Show the cup where it meets a visible face: the top face's front edge (flat),
+            // or the front face's bottom edge (on edge); the cup goes into the board from the skin.
+            const cc = flat ? 1 : 0;
+            const x0 = rings[0][cc][0], x1 = rings[1][cc][0];
+            const edge = X => {
+                const f = (X - x0) / (x1 - x0);
+                const base = vadd(rings[0][cc], vmul(vsub(rings[1][cc], rings[0][cc]), f));
+                const d = cupAt(X);
+                return { base, cupped: flat ? [base[0], base[1], base[2] - d] : [base[0], base[1] + d, base[2]] };
+            };
+            const xs = [];
+            for (let m = 0; m <= 40; m++) xs.push(x0 + (x1 - x0) * m / 40);
+            el('path', { d: path(xs.map(X => edge(X).cupped)), class: 'cup-line' }, g);
+            const c = edge((x0 + x1) / 2);
+            el('path', { d: path([c.base, c.cupped]), class: 'cup-tick' }, g);
+            const lab = P([(x0 + x1) / 2, fenceH, -fenceT]);
+            el('text', { x: VW / 2, y: top - 4, class: 'detail-label cup-text label-halo', 'text-anchor': 'middle', text: `cup the skin face to a ${formatInches(rib.cupR)} radius, ${formatInches(rib.cupDepth)} deep at the center` }, svg);
+        }
+        // Scale bar
+        const bar = (xHi - xLo) > 30 ? 12 : 6;
+        const sb1 = [xHi + margin * 1.1, 0, dimZ + margin * 0.4], sb0 = [sb1[0] - bar, 0, sb1[2]];
+        el('path', { d: path([sb0, sb1]), class: 'scale-bar' }, g);
+        const sbm = P([(sb0[0] + sb1[0]) / 2, 0, sb0[2]]);
+        el('text', { x: sbm[0], y: sbm[1] - 4, class: 'detail-label subtle', 'text-anchor': 'middle', text: `${bar}"` }, g);
+    }
+
+    // ---- Panel 2: close-up of the left end, with the miter and bevel ----
+    const r2 = { x: 0, y: 136, w: VW, h: VH - 136 };
+    const span = Math.max(boardW, boardH) * 2.2;
+    const focus = [...rings[0], [xLo + span * 0.55, boardH, 0], [xLo + span * 0.55, 0, boardW], [xLo, 0, boardW * 1.25], [xLo, boardH * 1.3, 0]];
+    const v2 = panel(r2, focus, 90, 10, camera(34 * DEG, 38 * DEG));
+    {
+        const { P, path, g } = v2;
+        el('line', { x1: 0, y1: r2.y, x2: VW, y2: r2.y, class: 'panel-sep' }, svg);
+        // Angle wedge between two legs from a vertex, with the legs drawn past the board so the angle reads
+        const wedge = (V, d1, d2, len, label, labelSide) => {
+            const n1 = vnorm(d1), n2 = vnorm(d2);
+            const arc = [V];
+            for (let m = 0; m <= 16; m++) arc.push(vadd(V, vmul(vnorm(vadd(vmul(n1, 1 - m / 16), vmul(n2, m / 16))), len * 0.7)));
+            el('path', { d: path(arc, true), class: 'angle-wedge' }, g);
+            el('path', { d: path([V, vadd(V, vmul(n1, len))]), class: 'square-ref' }, g);
+            el('path', { d: path([V, vadd(V, vmul(n2, len))]), class: 'cut-edge' }, g);
+            const tip = P(vadd(V, vmul(vnorm(vadd(n1, n2)), len * 1.05)));
+            const tx = Math.max(70, Math.min(VW - 70, tip[0] + (labelSide > 0 ? 4 : -4)));
+            const ty = Math.max(r2.y + 12, Math.min(VH - 16, tip[1] + 3));
+            el('text', { x: tx, y: ty, class: 'detail-label angle-text label-halo', 'text-anchor': labelSide > 0 ? 'start' : 'end', text: label }, svg);
+        };
+        // Miter: on the top face, between a square line off the fence and the cut
+        const A = topL[0].p, B = topL[1].p;
+        const w = B[2] - A[2];
+        wedge(A, [0, 0, 1], vsub(B, A), w * 1.6, `miter ${formatDeg(rib.miter)}`, 1);
+        // Bevel: on the end face, between plumb and the cut, through the middle of the end
+        const Mb = vmul(vadd(botL[0].p, botL[1].p), 0.5), Mt = vmul(vadd(topL[0].p, topL[1].p), 0.5);
+        wedge(Mb, [0, 1, 0], vsub(Mt, Mb), (Mt[1] - Mb[1]) * 2.2, `bevel ${formatDeg(rib.bevel)}`, -1);
+        el('text', { x: VW - 6, y: VH - 6, class: 'detail-label subtle', 'text-anchor': 'end', text: 'left end, close up' }, svg);
+    }
+    el('text', { x: VW / 2, y: 11, class: 'detail-label subtle', 'text-anchor': 'middle', text: `to scale · ${flat ? 'lying flat, skin edge toward you' : 'on edge, skin face down, lower face toward you'} · far end mirrored` }, svg);
+}
+
+function xy([x, y], dx = 0, dy = 0) { return { x: x + dx, y: y + dy }; }
