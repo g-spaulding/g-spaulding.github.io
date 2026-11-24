@@ -135,17 +135,20 @@ const BowlGeo = (() => {
     // ---------- Simple orbit-able 3D renderer (painter's algorithm) ----------
     // scene: array of { type: 'poly'|'line', pts: [[x,y,z],...], cls, bias }
     function orbitView(svg, opts = {}) {
-        const vb = svg.viewBox.baseVal;
-        const W = vb.width, H = vb.height;
-        let yaw = opts.yaw ?? -25 * DEG;
-        let pitch = opts.pitch ?? 28 * DEG;
+        const homeYaw = opts.yaw ?? -25 * DEG;
+        const homePitch = opts.pitch ?? 28 * DEG;
+        let yaw = homeYaw;
+        let pitch = homePitch;
         let zoom = 1;
         let scene = [];
         let center = [0, 0, 0];
         let radius = 1;
+        let hovered = null;
         const root = el('g', {}, svg);
 
         function project([x, y, z]) {
+            const vb = svg.viewBox.baseVal;
+            const W = vb.width, H = vb.height;
             x -= center[0]; y -= center[1]; z -= center[2];
             const cx = x * Math.cos(yaw) - z * Math.sin(yaw);
             const cz = x * Math.sin(yaw) + z * Math.cos(yaw);
@@ -158,41 +161,79 @@ const BowlGeo = (() => {
         // Simple Lambert shading with a light fixed in world space (above, slightly in front)
         const light = (() => { const v = [0.35, 1, -0.6]; const l = Math.hypot(...v); return v.map(c => c / l); })();
         function shadeColor(item) {
-            const [a, b, c] = item.pts;
-            const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-            const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-            const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+            let n = item.n;
+            if (!n) {
+                const [a, b, c] = item.pts;
+                const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+            }
             const len = Math.hypot(...n) || 1;
-            const k = Math.abs(n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / len;
+            const dot = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / len;
+            // Solids (known outward normal) get one-sided light plus ambient; open surfaces are lit from both sides
+            const k = item.n ? 0.3 + 0.7 * Math.max(0, dot) : Math.abs(dot);
             const [hue, sat, lo, hi] = item.shade;
             return `hsl(${hue} ${sat}% ${(lo + (hi - lo) * k).toFixed(1)}%)`;
         }
 
-        function render() {
-            clear(root);
-            const items = scene.map(item => {
-                const p = item.pts.map(project);
-                const depth = p.reduce((a, q) => a + q[2], 0) / p.length + (item.bias || 0) * radius;
-                return { item, p, depth };
-            });
-            items.sort((a, b) => b.depth - a.depth);
-            items.forEach(({ item, p }) => {
-                const extra = opts.extraClass ? opts.extraClass(item) : '';
-                const attrs = { class: extra ? `${item.cls} ${extra}` : item.cls };
-                if (item.data) Object.assign(attrs, item.data);
-                if (item.type === 'poly') {
-                    attrs.points = pts(p);
-                    if (item.shade) attrs.style = `fill: ${shadeColor(item)}`;
-                    el('polygon', attrs, root);
-                } else {
-                    attrs.points = pts(p);
-                    el('polyline', attrs, root);
+        let frame = null;
+        function requestRender() {
+            if (frame) return;
+            frame = requestAnimationFrame(() => { frame = null; render(); });
+        }
+
+        // Elements are pooled and reused between frames: rebuilding thousands of nodes per frame is too slow
+        const pool = [];
+        function styleFor(item) {
+            if (item._style === undefined) {
+                item._style = '';
+                if (item.type === 'poly' && item.shade) {
+                    const c = shadeColor(item); // light is fixed in world space, so this never changes
+                    // seamless: stroke with the fill colour to hide hairline gaps between tessellated faces
+                    item._style = item.seamless ? `fill: ${c}; stroke: ${c}; stroke-width: 0.6` : `fill: ${c}`;
                 }
+            }
+            return item._style;
+        }
+
+        function render() {
+            if (frame) { cancelAnimationFrame(frame); frame = null; }
+            // Direction of increasing depth, in world space: faces whose outward normal points this way face away
+            const away = [Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
+            const items = [];
+            for (const item of scene) {
+                if (item.n && item.n[0] * away[0] + item.n[1] * away[1] + item.n[2] * away[2] > 1e-9) continue;
+                const p = item.pts.map(project);
+                let depth = 0;
+                for (const q of p) depth += q[2];
+                items.push({ item, p, depth: depth / p.length + (item.bias || 0) * radius });
+            }
+            items.sort((a, b) => b.depth - a.depth);
+            items.forEach(({ item, p }, j) => {
+                let node = pool[j];
+                if (!node) { node = el('path', {}, root); pool.push(node); }
+                let d = 'M';
+                for (let q = 0; q < p.length; q++) d += (q ? 'L' : '') + p[q][0].toFixed(1) + ' ' + p[q][1].toFixed(1);
+                if (item.type === 'poly') d += 'Z';
+                node.setAttribute('d', d);
+                let cls = item.cls;
+                const extra = opts.extraClass ? opts.extraClass(item) : '';
+                if (extra) cls += ' ' + extra;
+                if (item.info) cls += ' pickable';
+                if (hovered && item.info && item.info === hovered.info) cls += ' hovered';
+                if (node.__cls !== cls) { node.setAttribute('class', cls); node.__cls = cls; }
+                const st = styleFor(item);
+                if (node.__style !== st) { node.setAttribute('style', st); node.__style = st; }
+                node.__item = item;
             });
+            for (let j = items.length; j < pool.length; j++) {
+                if (pool[j].__cls !== 'unused') { pool[j].setAttribute('d', ''); pool[j].setAttribute('class', 'unused'); pool[j].__cls = 'unused'; pool[j].__item = null; }
+            }
         }
 
         function setScene(newScene) {
             scene = newScene;
+            hovered = null;
             // bounding sphere so rotating doesn't change the zoom
             let min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
             scene.forEach(it => it.pts.forEach(p => {
@@ -207,33 +248,60 @@ const BowlGeo = (() => {
             render();
         }
 
-        // Drag to orbit
+        // Items with .info can be hovered (mouse) or tapped (touch) when opts.onHover is set
+        function setHovered(item, e) {
+            const same = (item && item.info) === (hovered && hovered.info);
+            hovered = item && item.info ? item : null;
+            if (!same) render();
+            if (opts.onHover) opts.onHover(hovered, e);
+        }
+
+        // Drag to orbit; a press that doesn't move is a click
         let drag = null;
         svg.style.touchAction = 'none';
         svg.addEventListener('pointerdown', e => {
-            drag = { x: e.clientX, y: e.clientY, yaw, pitch };
-            svg.setPointerCapture(e.pointerId);
+            drag = { x: e.clientX, y: e.clientY, yaw, pitch, moved: false, target: e.target.__item || null };
+            try { svg.setPointerCapture(e.pointerId); } catch (_) { /* pointer already gone */ }
             svg.classList.add('dragging');
         });
         svg.addEventListener('pointermove', e => {
-            if (!drag) return;
+            if (!drag) {
+                if (opts.onHover && e.pointerType === 'mouse') setHovered(e.target.__item || null, e);
+                return;
+            }
+            if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4) drag.moved = true;
+            if (!drag.moved) return;
             yaw = drag.yaw - (e.clientX - drag.x) * 0.01;
             pitch = Math.max(-5 * DEG, Math.min(89 * DEG, drag.pitch + (e.clientY - drag.y) * 0.01));
-            render();
+            if (hovered) setHovered(null, e);
+            requestRender();
         });
-        const end = () => { drag = null; svg.classList.remove('dragging'); };
-        svg.addEventListener('pointerup', end);
-        svg.addEventListener('pointercancel', end);
+        svg.addEventListener('pointerup', e => {
+            const d = drag;
+            drag = null;
+            svg.classList.remove('dragging');
+            if (d && !d.moved) {
+                if (opts.onHover && e.pointerType !== 'mouse') setHovered(d.target, e);
+                if (opts.onClick) opts.onClick(d.target, e);
+            }
+        });
+        svg.addEventListener('pointercancel', () => { drag = null; svg.classList.remove('dragging'); });
+        svg.addEventListener('pointerleave', e => { if (!drag && hovered && e.pointerType === 'mouse') setHovered(null, e); });
         svg.addEventListener('wheel', e => {
             e.preventDefault();
-            zoom = Math.max(0.5, Math.min(4, zoom * Math.exp(-e.deltaY * 0.001)));
-            render();
+            zoom = Math.max(0.5, Math.min(6, zoom * Math.exp(-e.deltaY * 0.001)));
+            requestRender();
         }, { passive: false });
-        svg.addEventListener('dblclick', () => {
-            yaw = opts.yaw ?? -25 * DEG; pitch = opts.pitch ?? 28 * DEG; zoom = 1; render();
+        svg.addEventListener('dblclick', e => {
+            e.preventDefault();
+            yaw = homeYaw; pitch = homePitch; zoom = 1; render();
         });
 
-        return { setScene, render };
+        // Share orientation between views (e.g. thumbnail -> fullscreen)
+        function getView() { return { yaw, pitch, zoom }; }
+        function setView(v) { ({ yaw, pitch, zoom } = v); render(); }
+
+        return { setScene, render, getView, setView };
     }
 
     // ---------- Form state <-> URL ----------

@@ -5,16 +5,33 @@ let lastResult = null;
 let activeRib = null;
 let pinnedRib = null;
 let iso = null;
+let isoFull = null;
+let fsOpen = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     const form = $('calculator-form');
     const saveUrl = BowlGeo.syncFormWithUrl(form);
 
+    const extraClass = item => (item.rib && item.rib === activeRib ? 'active' : '');
     iso = BowlGeo.orbitView($('iso-view'), {
         yaw: -12 * DEG,
         pitch: 32 * DEG,
-        extraClass: item => (item.rib && item.rib === activeRib ? 'active' : '')
+        extraClass,
+        onClick: () => openFullscreen()
     });
+    isoFull = BowlGeo.orbitView($('fs-view'), {
+        yaw: -12 * DEG,
+        pitch: 32 * DEG,
+        extraClass,
+        onHover: showPartInfo,
+        onClick: item => {
+            if (item && item.info && item.info.kind === 'rib') {
+                pinnedRib = pinnedRib === item.rib ? null : item.rib;
+                setActiveRib(item.rib);
+            }
+        }
+    });
+    setupFullscreen();
 
     const update = () => {
         updateShapeFields();
@@ -130,6 +147,7 @@ function calculate() {
         if (g) g.count++; else groups.push({ key, off: o1 + o2, count: 1, end: o1 !== oMid || o2 !== oMid });
     });
     groups.sort((a, b) => a.end - b.end);
+    const bayGroup = bays.map(([o1, o2]) => groups.findIndex(g => g.key === (o1 + o2).toFixed(6)));
 
     const lengthAt = (u, off) => 2 * u * Math.sin(h) - off * Math.cos(h);
     const minLen = Math.max(1, i.t);
@@ -165,7 +183,7 @@ function calculate() {
     const uStart = Math.max(r0, needsTrim ? uCollide : 0);
 
     const result = {
-        uStart, i, theta, phi, h, r0, prof, ribs, groups, truncated, uCollide, needsTrim, oMid, oEnd,
+        uStart, bayGroup, i, theta, phi, h, r0, prof, ribs, groups, truncated, uCollide, needsTrim, oMid, oEnd,
         topChord: 2 * prof.topU * Math.sin(theta / 2),
         supportSpacing: 2 * prof.topU * Math.sin(h),
         facet: prof.topU * (1 - Math.cos(h))
@@ -283,16 +301,37 @@ function setActiveRib(n) {
         e.classList.toggle('active', +e.dataset.rib === n);
     });
     iso && iso.render();
+    fsOpen && isoFull.render();
     if (n && lastResult) drawRibDetail(lastResult, n);
 }
 
 // ---------- Support profile (side view) ----------
+// The support's curved edge in (u, y), starting exactly where the support starts
+function supportProfile(prof, uStart, n = 40) {
+    const aStart = Math.asin(Math.max(0, Math.min(1, (uStart - prof.r0) / prof.R)));
+    const sStart = prof.R * aStart;
+    const list = [];
+    for (let k = 0; k <= n; k++) {
+        const p = prof.at(sStart + (prof.total - sStart) * k / n);
+        list.push([p.u, p.y]);
+    }
+    if (prof.vert > 0 && sStart < prof.arcLen) {
+        const j = prof.at(prof.arcLen);
+        list.push([j.u, j.y]);
+        list.sort((a, b) => a[1] - b[1]);
+    }
+    return list;
+}
+
+function supportBack(prof) {
+    return prof.topU + Math.max(3, prof.R * 0.06);
+}
+
 function supportOutline(prof, uStart) {
     // Plywood template in (u, y): floor from uStart, up the profile, back behind the coping and down.
-    const back = Math.max(3, prof.R * 0.06);
-    const outline = [[uStart, 0]];
-    prof.samples(40).forEach(p => { if (p.u >= uStart) outline.push([p.u, p.y]); });
-    outline.push([prof.topU + back, prof.H], [prof.topU + back, 0]);
+    const back = supportBack(prof);
+    const outline = [[uStart, 0], ...supportProfile(prof, uStart)];
+    outline.push([back, prof.H], [back, 0]);
     return outline;
 }
 
@@ -462,21 +501,11 @@ function draw3D(r) {
     floor.push([wallEnds[1].e[0], 0, wallEnds[1].e[1]], [wallEnds[1].inward[0], 0, wallEnds[1].inward[1]]);
     scene.push({ type: 'poly', pts: floor, cls: 'floor3d', bias: 10 });
 
-    // Supports (plywood templates)
-    const outline = supportOutline(prof, uStart);
-    for (let k = 0; k <= i.n; k++) {
-        const psi = -halfT + k * phi;
-        scene.push({ type: 'poly', pts: outline.map(([u, y]) => W(u, y, psi)), cls: 'ply3d', shade: [38, 45, 35, 72] });
-    }
-
-    // Ribs (as the skin-side edge): straight across each bay, or following the surface when cupped
+    // Supports (plywood slabs) and ribs (solid lumber)
+    for (let k = 0; k <= i.n; k++) scene.push(...supportSolid(r, k));
     const sub = i.curved ? Math.max(2, Math.ceil(phi / (4 * DEG))) : 1;
     r.ribs.forEach(rib => {
-        for (let k = 0; k < i.n; k++) {
-            const list = [];
-            for (let m = 0; m <= sub; m++) list.push(W(rib.u, rib.y, -halfT + (k + m / sub) * phi));
-            scene.push({ type: 'line', cls: 'rib3d', rib: rib.number, pts: list, bias: -0.01 });
-        }
+        for (let k = 0; k < i.n; k++) scene.push(...ribSolid(r, rib, k));
     });
 
     // Skin: flat facets between supports, or the true curved surface when ribs are cupped
@@ -506,12 +535,15 @@ function draw3D(r) {
         });
     }
 
-    // Coping line across the corner
-    const coping = [];
-    for (let k = 0; k <= i.n; k++) coping.push(W(prof.topU, prof.H, -halfT + k * phi));
-    for (let k = 0; k < i.n; k++) scene.push({ type: 'line', cls: 'coping3d', pts: [coping[k], coping[k + 1]], bias: -0.05 });
+    // Coping across the corner (bent to the deck radius), one piece per bay so it can be hovered
+    for (let k = 0; k < i.n; k++) {
+        const list = [];
+        for (let m = 0; m <= 8; m++) list.push(W(prof.topU, prof.H, -halfT + (k + m / 8) * phi));
+        scene.push({ type: 'line', cls: 'coping3d', pts: list, bias: -0.05, info: { kind: 'coping', k } });
+    }
 
     iso.setScene(scene);
+    isoFull.setScene(scene);
 }
 
 // ---------- Rib detail ----------
@@ -559,4 +591,243 @@ function drawRibDetail(r, n) {
         `Cut ${lens}. ${flat ? 'Lay it flat on the saw with the skin edge against the fence.' : 'Stand it on its skin face with the lower face against the fence.'} ` +
         `Miter ${formatDeg(rib.miter)}, bevel ${formatDeg(rib.bevel)}. Cut the other end mirrored.` +
         (i.curved ? ` Then cup the skin face to a ${formatInches(rib.cupR)} radius, ${formatInches(rib.cupDepth)} deep at the center.` : '');
+}
+
+// ---------- Full-screen 3D view with per-part measurements ----------
+function setupFullscreen() {
+    $('expand-3d').addEventListener('click', openFullscreen);
+    $('fs-close').addEventListener('click', closeFullscreen);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && fsOpen) closeFullscreen(); });
+    window.addEventListener('resize', () => fsOpen && fitFullscreen());
+    // Mirror the skin/walls toggles
+    [['fs-show-skin', 'show-skin'], ['fs-show-walls', 'show-walls']].forEach(([fsId, id]) => {
+        $(fsId).addEventListener('change', () => {
+            $(id).checked = $(fsId).checked;
+            $(id).dispatchEvent(new Event('change'));
+        });
+    });
+}
+
+function fitFullscreen() {
+    const svg = $('fs-view');
+    const { width, height } = svg.getBoundingClientRect();
+    svg.setAttribute('viewBox', `0 0 ${Math.max(1, Math.round(width))} ${Math.max(1, Math.round(height))}`);
+    isoFull.render();
+}
+
+function openFullscreen() {
+    if (!lastResult || fsOpen) return;
+    fsOpen = true;
+    $('fs-show-skin').checked = $('show-skin').checked;
+    $('fs-show-walls').checked = $('show-walls').checked;
+    $('fs').classList.remove('hidden');
+    document.body.classList.add('fs-locked');
+    fitFullscreen();
+    isoFull.setView(iso.getView());
+    $('fs-close').focus();
+}
+
+function closeFullscreen() {
+    fsOpen = false;
+    $('fs').classList.add('hidden');
+    document.body.classList.remove('fs-locked');
+    showPartInfo(null);
+    iso.setView(isoFull.getView());
+    $('expand-3d').focus();
+}
+
+function describePart(info) {
+    const r = lastResult;
+    const { i, prof, phi, theta } = r;
+    const rows = [];
+    let title = '';
+    if (info.kind === 'rib') {
+        const rib = info.rib;
+        const gi = r.bayGroup[info.k];
+        const g = r.groups[gi];
+        const bayName = r.groups.length > 1 ? (g.end ? 'end bay' : 'middle bay') : 'bay';
+        title = `Rib #${rib.number} · ${bayName} ${info.k + 1} of ${i.n}`;
+        rows.push(['Length', `<b>${formatInches(rib.lengths[gi])}</b> short point`]);
+        rows.push(['Miter', formatDeg(rib.miter)], ['Bevel', formatDeg(rib.bevel)]);
+        if (i.curved) rows.push(['Cup radius', formatLong(rib.cupR)], ['Cup depth', formatInches(rib.cupDepth)]);
+        rows.push(['From top', `${formatInches(rib.dft)} along the curve`], ['Height', `${formatInches(rib.y)} off the floor`]);
+        rows.push(['Skin slope', formatDeg(rib.a, 0)]);
+        rows.push(['Cut', `${g.count} like this per row`]);
+    } else if (info.kind === 'support') {
+        const k = info.k;
+        const end = k === 0 || k === i.n;
+        const psi = (-theta / 2 + k * phi) / DEG;
+        title = `Support ${k + 1} of ${i.n + 1}${end ? ' · outermost' : ''}`;
+        rows.push(['Position', Math.abs(psi) < 0.05 ? 'on the centerline' : `${Math.abs(psi).toFixed(1)}° ${psi < 0 ? 'left' : 'right'} of center`]);
+        rows.push(['Profile', `${formatLong(prof.R)} radius${prof.vert > 0 ? ` + ${formatInches(prof.vert)} vert` : ''}`]);
+        rows.push(['Height', formatLong(prof.H)]);
+        rows.push(['Starts', `${formatInches(r.uStart)} from corner center`]);
+        rows.push(['Coping at', `${formatLong(prof.topU)} from corner center`]);
+        if (end) rows.push(['Placement', i.endSupports === 'outside' ? 'face on the corner line' : 'centered on the corner line']);
+        else rows.push(['Placement', 'centered on its layout line']);
+        rows.push(['Rib marks', `${r.ribs.length}, first ${formatInches(i.t)} down, then every ${formatInches(i.spacing)} along the curve`]);
+    } else if (info.kind === 'coping') {
+        title = `Coping · bay ${info.k + 1} of ${i.n}`;
+        rows.push(['Coping radius', formatLong(prof.topU)]);
+        rows.push(['This bay', `${formatInches(prof.topU * phi)} along the curve`]);
+        rows.push(['Support to support', `${formatInches(r.supportSpacing)} straight`]);
+        rows.push(['Whole corner', `${formatLong(prof.topU * theta)} of coping`]);
+        rows.push(['Corner chord', formatLong(r.topChord)]);
+    }
+    return `<div class="fs-tip-title">${title}</div><dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
+}
+
+function showPartInfo(item, e) {
+    const tip = $('fs-tip');
+    if (!item || !lastResult) {
+        tip.classList.add('hidden');
+        if (fsOpen) setActiveRib(pinnedRib);
+        return;
+    }
+    tip.innerHTML = describePart(item.info);
+    tip.classList.remove('hidden');
+    if (item.info.kind === 'rib' && activeRib !== item.rib) setActiveRib(item.rib);
+    if (item.info.kind !== 'rib' && activeRib !== pinnedRib) setActiveRib(pinnedRib);
+    if (e) {
+        const pad = 16;
+        const w = tip.offsetWidth, h = tip.offsetHeight;
+        let x = e.clientX + pad, y = e.clientY + pad;
+        if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+        if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
+        tip.style.left = Math.max(8, x) + 'px';
+        tip.style.top = Math.max(8, y) + 'px';
+    }
+}
+
+// ---------- Solid geometry for the 3D views ----------
+const vadd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const vsub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vmul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+const vdot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vcross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const vnorm = a => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+const centroid = list => vmul(list.reduce(vadd, [0, 0, 0]), 1 / list.length);
+
+// Outward unit normal of a planar face, oriented away from a point inside the solid
+function outwardNormal(face, inside) {
+    let n = [0, 0, 0];
+    for (let j = 0; j < face.length; j++) { // Newell's method: robust for any planar polygon
+        const a = face[j], b = face[(j + 1) % face.length];
+        n = vadd(n, [(a[1] - b[1]) * (a[2] + b[2]), (a[2] - b[2]) * (a[0] + b[0]), (a[0] - b[0]) * (a[1] + b[1])]);
+    }
+    n = vnorm(n);
+    return vdot(n, vsub(centroid(face), inside)) < 0 ? vmul(n, -1) : n;
+}
+
+// Plywood support k as a slab, with its real thickness and placement
+function supportSolid(r, k) {
+    const { prof, i, theta, phi } = r;
+    const psi = -theta / 2 + k * phi;
+    const d = [Math.sin(psi), 0, Math.cos(psi)];     // radial direction in the support's plane
+    const m = [Math.cos(psi), 0, -Math.sin(psi)];    // slab normal, toward increasing psi
+    const s = i.s || 0.01;
+    let lo = -s / 2, hi = s / 2;
+    if (i.endSupports === 'outside' && i.n > 0) {
+        if (k === 0) { lo = -s; hi = 0; }
+        if (k === i.n) { lo = 0; hi = s; }
+    }
+    const P = (u, y, o) => [u * d[0] + o * m[0], y, u * d[2] + o * m[2]];
+    const info = { kind: 'support', k };
+    const shade = [38, 45, 38, 74];
+    const items = [];
+    const R = prof.R;
+
+    // Broad faces, tessellated so the painter's sort can interleave them with the ribs
+    const curve = supportProfile(prof, r.uStart, 28);
+    const back = supportBack(prof);
+    const quadsUV = [];
+    const pieces = y => Math.max(1, Math.ceil(y / (R / 8)));
+    for (let j = 0; j < curve.length - 1; j++) {
+        const [u0, y0] = curve[j], [u1, y1] = curve[j + 1];
+        if (u1 - u0 < 1e-6) continue;
+        const nPieces = pieces(Math.max(y0, y1));
+        for (let q = 0; q < nPieces; q++) {
+            const t0 = q / nPieces, t1 = (q + 1) / nPieces;
+            quadsUV.push([[u0, y0 * t0], [u1, y1 * t0], [u1, y1 * t1], [u0, y0 * t1]]);
+        }
+    }
+    const nBack = pieces(prof.H);
+    for (let q = 0; q < nBack; q++) {
+        const y0 = prof.H * q / nBack, y1 = prof.H * (q + 1) / nBack;
+        quadsUV.push([[prof.topU, y0], [back, y0], [back, y1], [prof.topU, y1]]);
+    }
+    [[lo, vmul(m, -1)], [hi, m]].forEach(([o, n]) => {
+        quadsUV.forEach(q => items.push({ type: 'poly', cls: 'ply3d', seamless: true, shade, info, n, pts: q.map(([u, y]) => P(u, y, o)) }));
+    });
+
+    // Edges of the plywood: one strip per outline segment
+    const outline = supportOutline(prof, r.uStart);
+    let area = 0;
+    outline.forEach((a, j) => { const b = outline[(j + 1) % outline.length]; area += a[0] * b[1] - b[0] * a[1]; });
+    const ccw = area > 0;
+    outline.forEach((a, j) => {
+        const b = outline[(j + 1) % outline.length];
+        const du = b[0] - a[0], dy = b[1] - a[1];
+        const len = Math.hypot(du, dy);
+        if (len < 1e-6) return;
+        const nu = (ccw ? dy : -dy) / len, ny = (ccw ? -du : du) / len; // outward, in the support's plane
+        const n = [nu * d[0], ny, nu * d[2]];
+        items.push({ type: 'poly', cls: 'ply3d ply-edge', shade: [38, 40, 28, 60], info, n,
+            pts: [P(a[0], a[1], lo), P(b[0], b[1], lo), P(b[0], b[1], hi), P(a[0], a[1], hi)] });
+    });
+    return items;
+}
+
+// A rib in bay k as a solid: cross-section t × depth, ends cut on the support faces,
+// skin face cupped to the cup radius when curved ribs are selected.
+function ribSolid(r, rib, k) {
+    const { prof, i, theta, phi, h } = r;
+    const beta = -theta / 2 + (k + 0.5) * phi;            // bay bisector
+    const ex = [Math.cos(beta), 0, -Math.sin(beta)];       // along the rib
+    const ez = [Math.sin(beta), 0, Math.cos(beta)];        // outward, horizontal
+    const [o1, o2] = [k === 0 ? r.oEnd : r.oMid, k === i.n - 1 ? r.oEnd : r.oMid];
+    const oAvg = (o1 + o2) / 2;
+
+    // Cross-section corners in the support plane: skin-lower, skin-upper, back-upper, back-lower
+    const sec = ribSection(prof, rib, i.t, i.depth);
+    const toZ = u => u * Math.cos(h) + oAvg * Math.sin(h);   // support-plane u -> distance along the bisector
+    const corners = sec.map(([u, y]) => ({ z: toZ(u), y }));
+    // End planes: x·cos h − z·sin h = −o2 (right), −x·cos h − z·sin h = −o1 (left)
+    const xR = z => (z * Math.sin(h) - o2) / Math.cos(h);
+    const xL = z => -(z * Math.sin(h) - o1) / Math.cos(h);
+    const nOut = [Math.sin(rib.a), -Math.cos(rib.a)];      // away from the bowl, in (z, y)
+
+    const segs = i.curved ? 4 : 1;
+    const ref = corners[0];
+    const xMid = (xL(ref.z) + xR(ref.z)) / 2;
+    const cup = x => {
+        if (!i.curved) return 0;
+        const dx = x - xMid;
+        return Math.max(0, rib.cupDepth - (rib.cupR - Math.sqrt(Math.max(0, rib.cupR * rib.cupR - dx * dx))));
+    };
+    const W = (x, z, y) => vadd(vadd(vmul(ex, x), vmul(ez, z)), [0, y, 0]);
+    // rings[t][c]: point of corner c at station t
+    const rings = [];
+    for (let t = 0; t <= segs; t++) {
+        const f = t / segs;
+        rings.push(corners.map((c, ci) => {
+            const x = xL(c.z) + (xR(c.z) - xL(c.z)) * f;
+            const off = ci < 2 ? cup(x) : 0;
+            return W(x, c.z + nOut[0] * off, c.y + nOut[1] * off);
+        }));
+    }
+    const inside = centroid(rings[Math.floor(segs / 2)]);
+    const info = { kind: 'rib', rib, k };
+    const shade = [28, 55, 48, 84];
+    const items = [];
+    const face = pts => items.push({ type: 'poly', cls: 'rib-solid', rib: rib.number, seamless: true, shade, info, n: outwardNormal(pts, inside), pts, bias: -0.004 });
+    for (let t = 0; t < segs; t++) {
+        for (let c = 0; c < 4; c++) {
+            const c2 = (c + 1) % 4;
+            face([rings[t][c], rings[t + 1][c], rings[t + 1][c2], rings[t][c2]]);
+        }
+    }
+    face(rings[0].slice());
+    face(rings[segs].slice());
+    return items;
 }

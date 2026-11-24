@@ -229,8 +229,11 @@
                     <svg id="top-view" viewBox="0 0 220 200" preserveAspectRatio="xMidYMid meet"></svg>
                 </div>
                 <div class="viz-container viz-3d">
-                    <h3>3D View <span class="subtle">drag to rotate · scroll to zoom · double-click to reset</span></h3>
-                    <svg id="iso-view" viewBox="0 0 260 220" preserveAspectRatio="xMidYMid meet"></svg>
+                    <h3>3D View <span class="subtle">click to expand · drag to rotate</span></h3>
+                    <div class="iso-wrap">
+                        <svg id="iso-view" viewBox="0 0 260 220" preserveAspectRatio="xMidYMid meet"></svg>
+                        <button type="button" id="expand-3d" class="expand-btn" aria-label="Open full-screen 3D view" title="Full screen, with measurements">⤢</button>
+                    </div>
                     <div class="viz-toggles">
                         <label><input type="checkbox" id="show-skin" checked> skin</label>
                         <label><input type="checkbox" id="show-walls" checked> walls</label>
@@ -238,6 +241,20 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <div id="fs" class="fs hidden" role="dialog" aria-modal="true" aria-label="Full-screen 3D view">
+        <div class="fs-bar">
+            <b>3D View</b>
+            <span class="subtle">Hover over (or tap) a rib, support or coping to see its measurements. Click a rib to pin it. Drag to rotate, scroll to zoom, double-click to reset.</span>
+            <span class="fs-controls">
+                <label><input type="checkbox" id="fs-show-skin"> skin</label>
+                <label><input type="checkbox" id="fs-show-walls"> walls</label>
+                <button type="button" id="fs-close" class="secondary">Close ✕</button>
+            </span>
+        </div>
+        <svg id="fs-view" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="fs-tip" class="fs-tip hidden" role="status"></div>
     </div>
 
     <script src="../calculator-common.js"></script>

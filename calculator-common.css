@@ -407,6 +407,7 @@ tr:hover {
 /* ---------- Form groups, errors, misc ---------- */
 fieldset {
     border: none;
+    min-width: 0;
     padding: 0;
     margin: 0 0 0.5rem 0;
     display: flex;
@@ -425,6 +426,8 @@ legend {
 
 .input-group select {
     max-width: 100%;
+    min-width: 0;
+    text-overflow: ellipsis;
 }
 
 .error {
@@ -553,6 +556,109 @@ details.math summary { cursor: pointer; font-weight: 500; }
     .results { break-before: avoid; }
     tr { break-inside: avoid; }
 }
+
+
+/* ---------- Full-screen 3D view ---------- */
+.iso-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+.iso-wrap svg { flex: 1; }
+.viz-3d svg#iso-view { cursor: zoom-in; }
+.viz-3d svg#iso-view.dragging { cursor: grabbing; }
+
+.expand-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 4px;
+    border: 1px solid var(--viz-border);
+    background: var(--viz-bg);
+    color: var(--viz-line);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+}
+.expand-btn:hover, .expand-btn:focus-visible { opacity: 1; border-color: var(--c-radius); }
+
+body.fs-locked { overflow: hidden; }
+
+.fs {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    background: var(--viz-bg);
+    color: var(--viz-line);
+}
+.fs.hidden { display: none; }
+
+.fs-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--viz-border);
+    font-size: 0.9rem;
+}
+.fs-bar .subtle { flex: 1; min-width: 12rem; }
+.fs-controls { display: flex; align-items: center; gap: 1rem; }
+.fs-controls label { font-weight: normal; font-size: 0.85rem; cursor: pointer; }
+
+#fs-view { flex: 1; width: 100%; min-height: 0; cursor: grab; font-size: 12px; }
+#fs-view.dragging { cursor: grabbing; }
+
+#fs-view .skin3d, #fs-view .wall3d, #fs-view .floor3d { pointer-events: none; }
+#fs-view .rib3d { stroke-width: 3; stroke-linecap: round; }
+#fs-view .coping3d { stroke-width: 4; stroke-linecap: round; }
+#fs-view .pickable { cursor: pointer; }
+#fs-view .rib3d.active { stroke-width: 4.5; }
+#fs-view .rib3d.hovered { stroke: var(--c-rib-active); stroke-width: 7; }
+#fs-view .ply3d.hovered { stroke: var(--c-support); stroke-width: 3; }
+#fs-view .coping3d.hovered { stroke: var(--c-top); stroke-width: 7; }
+
+.fs-tip {
+    position: fixed;
+    z-index: 1001;
+    max-width: 320px;
+    padding: 0.6rem 0.8rem;
+    border-radius: 6px;
+    background: var(--viz-bg);
+    border: 1px solid var(--viz-border);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    font-size: 0.85rem;
+    pointer-events: none;
+}
+.fs-tip-title { font-weight: 600; margin-bottom: 0.35rem; }
+.fs-tip dl { margin: 0; gap: 0.1rem 0.75rem; }
+.fs-tip dt { font-weight: normal; color: var(--viz-muted); }
+.fs-tip dd { color: var(--viz-line); }
+
+@media (max-width: 600px) {
+    .fs-bar .subtle { display: none; }
+    .fs-tip { left: 8px !important; right: 8px; top: auto !important; bottom: 8px; max-width: none; }
+}
+
+
+@media (max-width: 799px) {
+    .visualization > .viz-container { flex: 1 1 0; min-width: 0; }
+    .viz-container svg, .iso-wrap svg { width: 100%; max-height: 30vh; }
+    .viz-toggles { display: none; }
+}
+
+
+/* Solid 3D model: highlight states have to beat the inline shading */
+.rib-solid { fill-opacity: 1; }
+.rib-solid.active { fill: var(--c-rib) !important; stroke: var(--c-rib) !important; }
+.rib-solid.hovered { fill: var(--c-rib-active) !important; stroke: var(--c-rib-active) !important; }
+.ply3d.hovered { fill: var(--c-support) !important; stroke: var(--c-support) !important; fill-opacity: 0.85; }
+.ply3d.ply-edge { stroke: var(--viz-ply-edge); stroke-width: 0.5; fill-opacity: 1; }
+.highlight-ribs .rib-solid { fill: var(--c-rib) !important; stroke: var(--c-rib) !important; }
+.highlight-supports .ply3d { fill: var(--c-support) !important; stroke: var(--c-support) !important; }
+.ply3d { fill-opacity: 1; }
 
 /* Dark mode support - must come last to override base styles */
 @media (prefers-color-scheme: dark) {
