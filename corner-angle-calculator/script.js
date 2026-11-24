@@ -1,286 +1,137 @@
-document.addEventListener('DOMContentLoaded', function() {
-    const form = document.getElementById('calculator-form');
-    const resultsDiv = document.getElementById('results');
+const { DEG, toInches, formatInches, formatLong, formatDeg, profile, el, clear, pts, fitter, dim } = BowlGeo;
+const $ = id => document.getElementById(id);
 
-    form.addEventListener('submit', function(e) {
-        e.preventDefault();
-        calculateCornerAngle();
-    });
-
-    // Auto-calculate on input change
-    form.querySelectorAll('input, select').forEach(input => {
-        input.addEventListener('change', () => {
-            if (form.checkValidity()) {
-                calculateCornerAngle();
-            }
-        });
-    });
-
-    setupHighlighting();
-
-    // Initial calculation
-    calculateCornerAngle();
+document.addEventListener('DOMContentLoaded', () => {
+    const form = $('calculator-form');
+    const saveUrl = BowlGeo.syncFormWithUrl(form);
+    const update = () => {
+        const torus = $('corner-shape').value === 'torus';
+        document.querySelectorAll('.torus-only').forEach(n => n.classList.toggle('hidden', !torus));
+        calculate();
+        saveUrl();
+    };
+    form.addEventListener('input', update);
+    form.addEventListener('change', update);
+    form.addEventListener('submit', e => { e.preventDefault(); update(); });
+    update();
+    BowlGeo.setupHighlighting();
 });
 
-function calculateCornerAngle() {
-    // Get inputs
-    const radiusValue = parseFloat(document.getElementById('radius').value);
-    const radiusUnit = document.getElementById('radius-unit').value;
-    const heightValue = parseFloat(document.getElementById('height').value);
-    const heightUnit = document.getElementById('height-unit').value;
-    const chordInches = parseFloat(document.getElementById('chord').value);
-
-    // Convert to inches
-    const radiusInches = radiusUnit === 'ft' ? radiusValue * 12 : radiusValue;
-    const heightInches = heightUnit === 'ft' ? heightValue * 12 : heightValue;
-
-    // Validate: height must be less than or equal to radius
-    if (heightInches > radiusInches) {
-        document.getElementById('results').classList.add('hidden');
-        alert('Height cannot exceed radius');
-        return;
-    }
-
-    // Calculate arc angle α from height
-    // h = R × (1 - cos(α))
-    // cos(α) = 1 - h/R
-    // α = arccos(1 - h/R)
-    const cosAlpha = 1 - heightInches / radiusInches;
-    const alpha = Math.acos(cosAlpha);
-
-    // Calculate top radius (horizontal distance at top)
-    // top_radius = R × sin(α)
-    const topRadius = radiusInches * Math.sin(alpha);
-
-    // Validate: chord must be less than 2 × top_radius (can't be wider than diameter)
-    if (chordInches > 2 * topRadius) {
-        document.getElementById('results').classList.add('hidden');
-        alert('Top straight line distance is too large for this radius and height combination');
-        return;
-    }
-
-    // Calculate corner angle from chord
-    // chord = 2 × top_radius × sin(θ/2)
-    // sin(θ/2) = chord / (2 × top_radius)
-    // θ = 2 × arcsin(chord / (2 × top_radius))
-    const sinHalfTheta = chordInches / (2 * topRadius);
-    const cornerAngle = 2 * Math.asin(sinHalfTheta);
-    const cornerAngleDegrees = cornerAngle * (180 / Math.PI);
-
-    // Update results
-    document.getElementById('top-radius').textContent = formatInches(topRadius);
-    document.getElementById('corner-angle').textContent = cornerAngleDegrees.toFixed(1) + '°';
-
-    document.getElementById('results').classList.remove('hidden');
-
-    // Update visualization
-    updateVisualization(radiusInches, heightInches, topRadius, cornerAngle);
+function showError(msg) {
+    $('error').textContent = msg || '';
+    $('error').classList.toggle('hidden', !msg);
+    $('results').classList.toggle('stale', !!msg);
 }
 
-function formatInches(inches) {
-    const wholeInches = Math.floor(inches);
-    const fraction = inches - wholeInches;
+function calculate() {
+    const num = id => parseFloat($(id).value);
+    const R = toInches(num('radius'), $('radius-unit').value);
+    const H = toInches(num('height'), $('height-unit').value);
+    const chord = toInches(num('chord'), $('chord-unit').value);
+    const torus = $('corner-shape').value === 'torus';
+    const coping = toInches(num('coping-radius'), $('coping-unit').value);
 
-    // Convert to 16ths
-    const sixteenths = Math.round(fraction * 16);
+    if (!(R > 0) || !(H > 0)) return showError('Enter a transition radius and height.');
+    if (!(chord > 0)) return showError('Enter the coping chord.');
 
-    if (sixteenths === 0) {
-        return wholeInches + '"';
-    } else if (sixteenths === 16) {
-        return (wholeInches + 1) + '"';
-    } else {
-        // Reduce fraction
-        let num = sixteenths;
-        let den = 16;
-        while (num % 2 === 0 && den % 2 === 0) {
-            num /= 2;
-            den /= 2;
+    const sphereTop = profile(R, H, 0).topU;
+    let r0 = 0;
+    if (torus) {
+        if (!(coping >= sphereTop - 1e-9)) {
+            return showError(`The coping radius can't be smaller than ${formatInches(sphereTop)}, the tight-corner radius for this transition.`);
         }
-        return wholeInches + ' ' + num + '/' + den + '"';
+        r0 = coping - sphereTop;
     }
-}
+    const prof = profile(R, H, r0);
+    const top = prof.topU;
 
-function updateVisualization(radius, height, topRadius, cornerAngle) {
-    // Side view
-    const svgSize = 200;
-    const padding = 15;
-    const drawArea = svgSize - 2 * padding;
+    if (chord > 2 * top) {
+        return showError(`A ${formatInches(chord)} chord is wider than the coping circle's diameter (${formatInches(2 * top)}). Check the measurements${torus ? ' or the coping radius' : ', or try a wide corner'}.`);
+    }
+    showError(null);
 
-    // Scale to fit
-    const scale = drawArea / radius;
+    // chord = 2·r·sin(θ/2)
+    const theta = 2 * Math.asin(chord / (2 * top));
+    const sagitta = top * (1 - Math.cos(theta / 2));
 
-    // Origin (toe) at bottom-left
-    const originX = padding;
-    const originY = svgSize - padding;
+    $('corner-angle').textContent = formatDeg(theta);
+    $('top-radius').innerHTML = formatLong(top);
+    $('toe-radius').innerHTML = formatLong(r0);
+    $('sagitta').innerHTML = formatLong(sagitta);
+    $('arc-length').innerHTML = formatLong(top * theta);
 
-    // Calculate arc angle
-    const alpha = Math.acos(1 - height / radius);
-
-    // Arc end point (top of ramp)
-    const arcEndX = originX + topRadius * scale;
-    const arcEndY = originY - height * scale;
-    const radiusScaled = radius * scale;
-
-    // Arc path from toe to top
-    const arcPath = document.getElementById('viz-arc');
-    arcPath.setAttribute('d',
-        `M ${originX} ${originY} ` +
-        `A ${radiusScaled} ${radiusScaled} 0 0 0 ${arcEndX} ${arcEndY}`
-    );
-
-    // Center of circle is above the toe
-    const centerX = originX;
-    const centerY = originY - radius * scale;
-
-    // Radius line from center to midpoint of arc
-    const midAlpha = alpha / 2;
-    const midArcX = originX + radius * Math.sin(midAlpha) * scale;
-    const midArcY = originY - radius * (1 - Math.cos(midAlpha)) * scale;
-
-    const radiusLine = document.getElementById('viz-radius');
-    radiusLine.setAttribute('x1', centerX);
-    radiusLine.setAttribute('y1', centerY);
-    radiusLine.setAttribute('x2', midArcX);
-    radiusLine.setAttribute('y2', midArcY);
-
-    // Radius label
-    const radiusLabel = document.getElementById('viz-radius-label');
-    radiusLabel.setAttribute('x', (centerX + midArcX) / 2 - 12);
-    radiusLabel.setAttribute('y', (centerY + midArcY) / 2 + 8);
-
-    // Height line (vertical from ground to top of ramp)
-    const heightLine = document.getElementById('viz-height');
-    heightLine.setAttribute('x1', arcEndX);
-    heightLine.setAttribute('y1', originY);
-    heightLine.setAttribute('x2', arcEndX);
-    heightLine.setAttribute('y2', arcEndY);
-
-    // Height label
-    const heightLabel = document.getElementById('viz-height-label');
-    heightLabel.setAttribute('x', arcEndX + 5);
-    heightLabel.setAttribute('y', (originY + arcEndY) / 2);
-
-    // Top radius line (horizontal from toe to top)
-    const topRadiusLine = document.getElementById('viz-top-radius');
-    topRadiusLine.setAttribute('x1', originX);
-    topRadiusLine.setAttribute('y1', arcEndY);
-    topRadiusLine.setAttribute('x2', arcEndX);
-    topRadiusLine.setAttribute('y2', arcEndY);
-
-    // Ground line
-    const groundLine = document.getElementById('viz-ground');
-    groundLine.setAttribute('y1', originY);
-    groundLine.setAttribute('y2', originY);
-
-    // Top view
-    updateTopView(topRadius, cornerAngle, radius);
-}
-
-function updateTopView(topRadius, cornerAngle, transitionRadius) {
-    const topView = document.getElementById('top-view');
-    const padding = 20;
-    const viewSize = 200 - 2 * padding;
-
-    // Toe point at bottom center
-    const toeX = 100;
-    const toeY = 190;
-
-    // Calculate the bounds we need to show
-    // The arc spans from -cornerAngle/2 to +cornerAngle/2 (centered)
-    // We need to show the chord endpoints
-    const halfAngle = cornerAngle / 2;
-
-    // Chord endpoints at topRadius distance
-    const leftX = topRadius * Math.sin(-halfAngle);
-    const leftY = -topRadius * Math.cos(-halfAngle);  // negative because Y goes up in our coord
-    const rightX = topRadius * Math.sin(halfAngle);
-    const rightY = -topRadius * Math.cos(halfAngle);
-
-    // Find bounding box
-    const maxX = Math.max(Math.abs(leftX), Math.abs(rightX));
-    const maxY = Math.max(Math.abs(leftY), Math.abs(rightY));
-
-    // Scale to fit
-    const scaleX = (viewSize / 2) / maxX;
-    const scaleY = (viewSize - 20) / Math.max(maxY, 1);
-    const scale = Math.min(scaleX, scaleY) * 0.85;
-
-    // Convert to SVG coordinates
-    const toSvg = (x, y) => ({
-        x: toeX + x * scale,
-        y: toeY + y * scale  // y is already negative for "up"
+    const p = new URLSearchParams({
+        radius: $('radius').value, 'radius-unit': $('radius-unit').value,
+        'max-height': $('height').value, 'height-unit': $('height-unit').value,
+        'corner-angle': (theta / DEG).toFixed(1),
+        'corner-shape': torus ? 'torus' : 'sphere',
+        'coping-radius': $('coping-radius').value, 'coping-unit': $('coping-unit').value
     });
+    $('rib-link').href = '../skate-bowl-calculator/?' + p.toString();
 
-    // Edge lines from toe to chord endpoints
-    const leftPoint = toSvg(leftX, leftY);
-    const rightPoint = toSvg(rightX, rightY);
-
-    const edgeLeft = document.getElementById('viz-edge-left');
-    edgeLeft.setAttribute('x1', toeX);
-    edgeLeft.setAttribute('y1', toeY);
-    edgeLeft.setAttribute('x2', leftPoint.x);
-    edgeLeft.setAttribute('y2', leftPoint.y);
-
-    const edgeRight = document.getElementById('viz-edge-right');
-    edgeRight.setAttribute('x1', toeX);
-    edgeRight.setAttribute('y1', toeY);
-    edgeRight.setAttribute('x2', rightPoint.x);
-    edgeRight.setAttribute('y2', rightPoint.y);
-
-    // Arc at top (from leftPoint to rightPoint)
-    const scaledRadius = topRadius * scale;
-    const largeArc = cornerAngle > Math.PI ? 1 : 0;
-    const topArc = document.getElementById('viz-top-arc');
-    topArc.setAttribute('d', `M ${leftPoint.x} ${leftPoint.y} A ${scaledRadius} ${scaledRadius} 0 ${largeArc} 1 ${rightPoint.x} ${rightPoint.y}`);
-
-    // Chord line
-    const chordLine = document.getElementById('viz-chord');
-    chordLine.setAttribute('x1', leftPoint.x);
-    chordLine.setAttribute('y1', leftPoint.y);
-    chordLine.setAttribute('x2', rightPoint.x);
-    chordLine.setAttribute('y2', rightPoint.y);
-
-    // Corner angle arc (small arc near toe point)
-    const angleArcRadius = 25;
-    const angleStartX = toeX + angleArcRadius * Math.sin(-halfAngle);
-    const angleStartY = toeY - angleArcRadius * Math.cos(-halfAngle);
-    const angleEndX = toeX + angleArcRadius * Math.sin(halfAngle);
-    const angleEndY = toeY - angleArcRadius * Math.cos(halfAngle);
-
-    const cornerAngleArc = document.getElementById('viz-corner-angle');
-    const angleArcLarge = cornerAngle > Math.PI ? 1 : 0;
-    cornerAngleArc.setAttribute('d', `M ${angleStartX} ${angleStartY} A ${angleArcRadius} ${angleArcRadius} 0 ${angleArcLarge} 1 ${angleEndX} ${angleEndY}`);
-
-    // Angle label
-    const angleLabel = document.getElementById('viz-angle-label');
-    const labelAngle = 0;  // Point straight up
-    angleLabel.setAttribute('x', toeX);
-    angleLabel.setAttribute('y', toeY - angleArcRadius - 5);
-    angleLabel.setAttribute('text-anchor', 'middle');
-    angleLabel.textContent = (cornerAngle * 180 / Math.PI).toFixed(1) + '°';
-
-    // Toe point
-    const toe = document.getElementById('viz-toe');
-    toe.setAttribute('cx', toeX);
-    toe.setAttribute('cy', toeY);
+    drawSide(prof);
+    drawTop(prof, theta, sagitta);
 }
 
-function setupHighlighting() {
-    const highlightElements = document.querySelectorAll('[data-highlight]');
-    const sideView = document.getElementById('side-view');
-    const topView = document.getElementById('top-view');
+function drawSide(prof) {
+    const svg = $('side-view');
+    clear(svg);
+    const f = fitter([[0, 0], [prof.topU + prof.R * 0.12, prof.H + prof.R * 0.1], [-prof.R * 0.05, 0]], 220, 200, 14);
+    const P = ([u, y]) => f(u, y);
+    el('line', { x1: 0, y1: P([0, 0])[1], x2: 220, y2: P([0, 0])[1], class: 'ground' }, svg);
+    const a0 = P([0, 0]), a1 = P([0, prof.H + prof.R * 0.05]);
+    el('line', { x1: a0[0], y1: a0[1], x2: a1[0], y2: a1[1], class: 'axis' }, svg);
+    el('polyline', { points: pts([[0, 0], ...prof.samples(60).map(p => [p.u, p.y])].map(P)), class: 'surface' }, svg);
+    const mid = prof.at(Math.min(prof.arcLen, prof.total) * 0.55);
+    dim(svg, P([prof.r0, prof.R]), P([mid.u, mid.y]), 'R', 'dim-radius', 6);
+    const hx = prof.topU + prof.R * 0.06;
+    dim(svg, P([hx, 0]), P([hx, prof.H]), 'H', 'dim-height', 7);
+    const ty = prof.H + prof.R * 0.05;
+    dim(svg, P([0, ty]), P([prof.topU, ty]), formatInches(prof.topU), 'dim-top-radius', -6);
+    if (prof.r0 > 0) dim(svg, P([0, 0]), P([prof.r0, 0]), '', 'dim-toe', 0);
+}
 
-    highlightElements.forEach(el => {
-        const highlightClass = 'highlight-' + el.dataset.highlight;
-
-        el.addEventListener('mouseenter', () => {
-            sideView.classList.add(highlightClass);
-            topView.classList.add(highlightClass);
-        });
-
-        el.addEventListener('mouseleave', () => {
-            sideView.classList.remove(highlightClass);
-            topView.classList.remove(highlightClass);
-        });
+function drawTop(prof, theta, sagitta) {
+    const svg = $('top-view');
+    clear(svg);
+    const half = theta / 2;
+    const top = prof.topU;
+    const XY = (u, psi) => [u * Math.sin(psi), u * Math.cos(psi)];
+    const wallLen = top * 0.4;
+    const bound = [[0, 0]];
+    const walls = [-1, 1].map(side => {
+        const psi = side * half;
+        const t = [side * Math.cos(psi), -side * Math.sin(psi)];
+        const c = XY(top, psi);
+        const e = [c[0] + t[0] * wallLen, c[1] + t[1] * wallLen];
+        bound.push(c, e);
+        return { c, e };
     });
+    for (let k = 0; k <= 16; k++) bound.push(XY(top, -half + theta * k / 16));
+    const f = fitter(bound, 220, 200, 14);
+    const P = ([x, y]) => f(x, y);
+    const arc = (u, cls, steps = 48) => {
+        const list = [];
+        for (let k = 0; k <= steps; k++) list.push(P(XY(u, -half + theta * k / steps)));
+        el('polyline', { points: pts(list), class: cls }, svg);
+    };
+    walls.forEach(({ c, e }) => {
+        el('line', { x1: P(c)[0], y1: P(c)[1], x2: P(e)[0], y2: P(e)[1], class: 'wall-edge' }, svg);
+        const o = P([0, 0]), cc = P(c);
+        el('line', { x1: o[0], y1: o[1], x2: cc[0], y2: cc[1], class: 'support' }, svg);
+    });
+    arc(top, 'coping');
+    if (prof.r0 > 0) arc(prof.r0, 'toe-line');
+    dim(svg, P(walls[0].c), P(walls[1].c), '', 'dim-chord', 0);
+    // Sagitta
+    const chordMid = [0, top * Math.cos(half)];
+    dim(svg, P(chordMid), P([0, top]), '', 'dim-sagitta', 0);
+    const rr = P(XY(top, 0));
+    el('line', { x1: P([0, 0])[0], y1: P([0, 0])[1], x2: rr[0], y2: rr[1], class: 'top-radius-line' }, svg);
+    const angR = Math.min(top * 0.22, 26 / f.scale);
+    arc(angR, 'angle-arc', 24);
+    const lab = P(XY(angR * 1.6, 0));
+    el('text', { x: lab[0] + 4, y: lab[1] + 3, class: 'angle-label', text: formatDeg(theta) }, svg);
+    const o = P([0, 0]);
+    el('circle', { cx: o[0], cy: o[1], r: 2.2, class: 'center-dot' }, svg);
 }

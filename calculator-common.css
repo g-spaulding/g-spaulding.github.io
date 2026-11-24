@@ -148,8 +148,8 @@ dd.note {
 .viz-container svg {
     width: 100%;
     height: auto;
-    background: #fafafa;
-    border: 1px solid #eee;
+    background: var(--viz-bg);
+    border: 1px solid var(--viz-border);
     border-radius: 4px;
 }
 
@@ -248,70 +248,90 @@ button[type="submit"]:hover {
     border-radius: 4px;
 }
 
-/* SVG highlight states - lines */
-.highlight-radius #viz-radius {
-    stroke: #007bff;
-    stroke-width: 3;
+/* ---------- Visualization palette ---------- */
+:root {
+    --viz-bg: #fafafa;
+    --viz-border: #eee;
+    --viz-line: #333;
+    --viz-muted: #999;
+    --viz-faint: #ccc;
+    --viz-ply: #e9d9b8;
+    --viz-ply-edge: #b89b67;
+    --viz-skin: rgba(120, 160, 190, 0.28);
+    --viz-floor: rgba(0, 0, 0, 0.05);
+    --c-radius: #007bff;
+    --c-height: #28a745;
+    --c-top: #dc3545;
+    --c-chord: #6f42c1;
+    --c-angle: #fd7e14;
+    --c-rib: #d6336c;
+    --c-rib-active: #ff0066;
+    --c-support: #17a2b8;
 }
 
-.highlight-height #viz-height {
-    stroke: #28a745;
-    stroke-width: 3;
-}
+.visualization svg { font-size: 9px; }
+.visualization svg text { fill: var(--viz-line); }
+.ground { stroke: var(--viz-muted); stroke-width: 1; }
+.axis { stroke: var(--viz-muted); stroke-width: 0.8; stroke-dasharray: 3,3; }
+.ply { fill: var(--viz-ply); stroke: var(--viz-ply-edge); stroke-width: 0.8; }
+.surface { fill: none; stroke: var(--viz-line); stroke-width: 2; }
+.rib { fill: var(--c-rib); stroke: none; opacity: 0.85; }
+.rib-line { fill: none; stroke: var(--c-rib); stroke-width: 0.8; opacity: 0.7; }
+.support { stroke: var(--viz-ply-edge); stroke-width: 1.6; }
+.coping { fill: none; stroke: var(--viz-line); stroke-width: 2.2; }
+.wall-edge { stroke: var(--viz-line); stroke-width: 1.4; opacity: 0.45; }
+.toe-line { fill: none; stroke: var(--viz-muted); stroke-width: 1; stroke-dasharray: 4,2; }
+.chord { stroke: var(--c-chord); stroke-width: 1.2; stroke-dasharray: 4,2; opacity: 0.6; }
+.top-radius-line { stroke: var(--c-top); stroke-width: 1.2; stroke-dasharray: 4,2; opacity: 0.6; }
+.angle-arc { fill: none; stroke: var(--c-angle); stroke-width: 1.5; }
+.visualization .angle-label { fill: var(--c-angle); }
+.center-dot { fill: var(--viz-line); }
+.trim-mark { fill: none; stroke: var(--c-top); stroke-width: 1.2; }
 
-.highlight-corner-angle #viz-corner-angle {
-    stroke: #fd7e14;
-    stroke-width: 3;
-}
+.dim { stroke-width: 1.1; stroke-dasharray: 3,2; }
+.dim-end { stroke: none; }
+.dim-radius .dim { stroke: var(--c-radius); } .dim-radius .dim-end, .visualization .dim-radius text { fill: var(--c-radius); }
+.dim-height .dim { stroke: var(--c-height); } .dim-height .dim-end, .visualization .dim-height text { fill: var(--c-height); }
+.dim-top-radius .dim { stroke: var(--c-top); } .dim-top-radius .dim-end, .visualization .dim-top-radius text { fill: var(--c-top); }
+.dim-toe .dim { stroke: var(--viz-muted); } .dim-toe .dim-end { fill: var(--viz-muted); }
+.dim-chord .dim { stroke: var(--c-chord); } .dim-chord .dim-end, .visualization .dim-chord text { fill: var(--c-chord); }
 
-/* SVG highlight states - text labels */
-.highlight-radius #viz-radius-label {
-    font-weight: bold;
-}
+.dim-sagitta .dim { stroke: var(--c-angle); } .dim-sagitta .dim-end { fill: var(--c-angle); }
+.highlight-sagitta .dim-sagitta .dim, .highlight-chord .dim-chord .dim { stroke-width: 2.5; stroke-dasharray: none; }
+dd.big { font-size: 1.4rem; font-weight: 600; }
 
-.highlight-height #viz-height-label {
-    font-weight: bold;
-}
+/* 3D */
+.viz-3d svg { cursor: grab; }
+.viz-3d svg.dragging { cursor: grabbing; }
+.floor3d { fill: var(--viz-floor); stroke: none; }
+.ply3d { fill: var(--viz-ply); stroke: var(--viz-ply-edge); stroke-width: 0.6; fill-opacity: 0.9; }
+.skin3d { fill: var(--viz-skin); fill-opacity: 0.55; stroke: rgba(80,110,140,0.3); stroke-width: 0.3; }
+.wall3d { fill: var(--viz-skin); fill-opacity: 0.45; stroke: rgba(80,110,140,0.2); stroke-width: 0.3; }
+.rib3d { fill: none; stroke: var(--c-rib); stroke-width: 1.3; }
+.coping3d { fill: none; stroke: var(--viz-line); stroke-width: 2.2; }
 
-.highlight-corner-angle #viz-angle-label {
-    font-weight: bold;
-}
+/* Highlight states, triggered by hovering labels/results */
+.highlight-radius .dim-radius .dim, .highlight-height .dim-height .dim,
+.highlight-top-radius .dim-top-radius .dim, .highlight-toe .dim-toe .dim { stroke-width: 2.5; stroke-dasharray: none; }
+.highlight-radius .dim-radius text, .highlight-height .dim-height text, .highlight-top-radius .dim-top-radius text { font-weight: bold; }
+.highlight-top-radius .coping, .highlight-top-radius .top-radius-line { stroke: var(--c-top); stroke-width: 3; opacity: 1; }
+.highlight-toe .toe-line { stroke: var(--c-top); stroke-width: 2.5; }
+.highlight-chord .chord { stroke-width: 3; opacity: 1; stroke-dasharray: none; }
+.highlight-corner-angle .angle-arc { stroke-width: 3.5; }
+.highlight-corner-angle .angle-label { font-weight: bold; }
+.highlight-supports .support { stroke: var(--c-support); stroke-width: 2.5; }
+.highlight-supports .ply3d, .highlight-supports .ply { stroke: var(--c-support); stroke-width: 1.5; }
+.highlight-support-spacing .support { stroke: var(--c-support); stroke-width: 2.5; }
+.highlight-support-spacing .coping { stroke: var(--c-support); }
+.highlight-ribs .rib, .highlight-ribs .rib-line, .highlight-ribs .rib3d { stroke: var(--c-rib-active); opacity: 1; }
+.highlight-ribs .rib-line, .highlight-ribs .rib3d { stroke-width: 2; }
+.highlight-trim .trim-mark { stroke-width: 3; }
+.highlight-facet .rib-line { opacity: 1; stroke-width: 1.4; }
+.highlight-height .surface { stroke: var(--c-height); }
 
-.highlight-supports #viz-supports line {
-    stroke: #17a2b8;
-    stroke-width: 2;
-}
-
-.highlight-ribs #viz-ribs circle {
-    fill: #e83e8c;
-    r: 5;
-}
-
-.highlight-top-radius #viz-top-radius {
-    stroke: #dc3545;
-    stroke-width: 3;
-}
-
-.highlight-top-radius #viz-top-arc {
-    stroke: #dc3545;
-    stroke-width: 3;
-}
-
-.highlight-chord #viz-chord {
-    stroke: #6f42c1;
-    stroke-width: 3;
-}
-
-/* Isometric view highlights */
-.highlight-ribs #viz-iso-ribs line {
-    stroke: #ff0066;
-    stroke-width: 2.5;
-}
-
-.highlight-supports #viz-iso-supports polyline {
-    stroke: #17a2b8;
-    stroke-width: 2.5;
-}
+.visualization .rib.active { fill: var(--c-rib-active); opacity: 1; stroke: var(--c-rib-active); stroke-width: 1.5; }
+.visualization .rib-line.active { stroke: var(--c-rib-active); stroke-width: 2.5; opacity: 1; }
+.visualization .rib3d.active { stroke: var(--c-rib-active); stroke-width: 3.5; }
 
 .results {
     margin-top: 2rem;
@@ -343,7 +363,6 @@ table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.9rem;
-    table-layout: fixed;
 }
 
 thead {
@@ -362,6 +381,7 @@ th {
 
 td {
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 tr:hover {
@@ -383,8 +403,186 @@ tr:hover {
     }
 }
 
+
+/* ---------- Form groups, errors, misc ---------- */
+fieldset {
+    border: none;
+    padding: 0;
+    margin: 0 0 0.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+legend {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #888;
+    margin-bottom: 0.5rem;
+    padding: 0;
+}
+
+.input-group select {
+    max-width: 100%;
+}
+
+.error {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    background: #fdecea;
+    color: #8a1c13;
+    border: 1px solid #f5c2bd;
+    font-size: 0.9rem;
+}
+
+.results.stale {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+.results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+button.secondary {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid #ccc;
+    background: transparent;
+    color: inherit;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+button.secondary:hover { border-color: #007bff; color: #007bff; }
+
+.subtle, .alt-units {
+    color: #888;
+    font-weight: normal;
+    font-size: 0.8em;
+}
+
+.viz-container h3 .subtle { font-size: 0.75em; margin-left: 0.25rem; }
+
+.qty {
+    color: #888;
+    font-weight: normal;
+    font-size: 0.85em;
+}
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+#results-table tbody tr.active,
+#results-table tbody tr.pinned {
+    background-color: rgba(214, 51, 108, 0.12);
+}
+
+#results-table tbody tr.pinned td:first-child {
+    box-shadow: inset 3px 0 0 var(--c-rib-active);
+}
+
+#results-table th:first-child,
+#results-table td:first-child { width: 2.5rem; }
+
+@media (max-width: 560px) {
+    .col-optional { display: none; }
+}
+
+.rib-detail {
+    width: 100%;
+    max-width: 480px;
+    display: block;
+    background: var(--viz-bg);
+    border: 1px solid var(--viz-border);
+    border-radius: 4px;
+    font-size: 10px;
+}
+
+.rib-detail .board { fill: var(--viz-ply); stroke: var(--viz-ply-edge); stroke-width: 1; }
+.rib-detail .ref-edge { stroke: var(--c-rib-active); stroke-width: 3; }
+.rib-detail .fence { stroke: var(--viz-muted); stroke-width: 4; opacity: 0.5; }
+.rib-detail .square-ref { stroke: var(--viz-muted); stroke-dasharray: 2,2; }
+.rib-detail text { fill: var(--viz-line); }
+.rib-detail .strong { font-weight: bold; fill: var(--c-rib-active); }
+.rib-detail .subtle { fill: var(--viz-muted); font-size: 8px; }
+
+.viz-toggles {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: #888;
+    padding-top: 0.25rem;
+}
+
+.viz-toggles label { font-weight: normal; font-size: 0.8rem; cursor: pointer; }
+
+details.math {
+    margin-top: 2rem;
+    font-size: 0.9rem;
+}
+
+details.math summary { cursor: pointer; font-weight: 500; }
+
+.formula {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(0,0,0,0.04);
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+}
+
+@media print {
+    nav, .right-column, #print-btn, .error, details.math, .page-header .description { display: none !important; }
+    body { background: white; color: black; margin: 0; max-width: none; }
+    .main-layout { display: block; padding: 0; max-width: none; }
+    .left-column { box-shadow: none; padding: 0; }
+    #calculator-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1rem; }
+    fieldset { gap: 0.25rem; }
+    .input-note, legend { display: none; }
+    input[type="number"], select { border: none; padding: 0; font-size: 0.9rem; -webkit-appearance: none; appearance: none; }
+    .results { break-before: avoid; }
+    tr { break-inside: avoid; }
+}
+
 /* Dark mode support - must come last to override base styles */
 @media (prefers-color-scheme: dark) {
+    :root {
+        --viz-bg: #0d1117;
+        --viz-border: #30363d;
+        --viz-line: #c9d1d9;
+        --viz-muted: #6e7681;
+        --viz-faint: #30363d;
+        --viz-ply: #5a4a2f;
+        --viz-ply-edge: #a08454;
+        --viz-skin: rgba(120, 170, 210, 0.22);
+        --viz-floor: rgba(255, 255, 255, 0.04);
+        --c-radius: #58a6ff;
+        --c-height: #3fb950;
+        --c-top: #f85149;
+        --c-chord: #a371f7;
+        --c-angle: #f0883e;
+        --c-rib: #ec6cb9;
+        --c-rib-active: #ff7bd0;
+        --c-support: #39c5cf;
+    }
+
+    .error {
+        background: #3a1d1d;
+        color: #ffb4ab;
+        border-color: #6e2b2b;
+    }
+
+    .formula { background: rgba(255,255,255,0.05); }
+
     .left-column,
     .right-column {
         background: #161b22;
@@ -419,8 +617,8 @@ tr:hover {
     }
 
     .viz-container svg {
-        background: #0d1117;
-        border-color: #30363d;
+        background: var(--viz-bg);
+        border-color: var(--viz-border);
     }
 
     thead {

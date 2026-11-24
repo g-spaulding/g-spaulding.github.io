@@ -1,566 +1,532 @@
-document.getElementById('calculator-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    calculateRibs();
+const { DEG, toInches, formatInches, formatLong, formatDeg, profile, el, clear, pts, fitter, dim } = BowlGeo;
+
+const $ = id => document.getElementById(id);
+let lastResult = null;
+let activeRib = null;
+let pinnedRib = null;
+let iso = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    const form = $('calculator-form');
+    const saveUrl = BowlGeo.syncFormWithUrl(form);
+
+    iso = BowlGeo.orbitView($('iso-view'), {
+        yaw: -12 * DEG,
+        pitch: 32 * DEG,
+        extraClass: item => (item.rib && item.rib === activeRib ? 'active' : '')
+    });
+
+    const update = () => {
+        updateShapeFields();
+        calculate();
+        saveUrl();
+    };
+    form.addEventListener('input', update);
+    form.addEventListener('change', update);
+    form.addEventListener('submit', e => { e.preventDefault(); update(); });
+    ['show-skin', 'show-walls'].forEach(id => $(id).addEventListener('change', () => lastResult && draw3D(lastResult)));
+    $('print-btn').addEventListener('click', () => window.print());
+
+    updateShapeFields();
+    calculate();
+    BowlGeo.setupHighlighting();
 });
 
-function calculateRibs() {
-    // Get inputs
-    const radiusValue = parseFloat(document.getElementById('radius').value);
-    const radiusUnit = document.getElementById('radius-unit').value;
-    const cornerAngleDeg = parseFloat(document.getElementById('corner-angle').value);
-    const numSections = parseInt(document.getElementById('num-sections').value);
-    const ribSpacing = parseFloat(document.getElementById('rib-spacing').value);
-    const maxHeightValue = parseFloat(document.getElementById('max-height').value);
-    const heightUnit = document.getElementById('height-unit').value;
-    const supportThickness = parseFloat(document.getElementById('support-thickness').value);
-    const ribThickness = parseFloat(document.getElementById('rib-thickness').value);
+function updateShapeFields() {
+    const torus = $('corner-shape').value === 'torus';
+    document.querySelectorAll('.torus-only').forEach(n => n.classList.toggle('hidden', !torus));
+}
 
-    // Convert to inches
-    const radius = radiusUnit === 'ft' ? radiusValue * 12 : radiusValue;
-    const maxHeight = heightUnit === 'ft' ? maxHeightValue * 12 : maxHeightValue;
+function readInputs() {
+    const num = id => parseFloat($(id).value);
+    return {
+        R: toInches(num('radius'), $('radius-unit').value),
+        H: toInches(num('max-height'), $('height-unit').value),
+        cornerDeg: num('corner-angle'),
+        shape: $('corner-shape').value,
+        coping: toInches(num('coping-radius'), $('coping-unit').value),
+        n: parseInt($('num-sections').value, 10),
+        spacing: num('rib-spacing'),
+        t: num('rib-thickness'),
+        depth: num('rib-depth'),
+        s: num('support-thickness'),
+        endSupports: $('end-supports').value,
+        saw: $('saw-setup').value
+    };
+}
 
-    // Validate
-    if (maxHeight > radius) {
-        alert('Maximum height cannot exceed the radius.');
-        return;
+function showError(msg) {
+    const box = $('error');
+    if (msg) {
+        box.textContent = msg;
+        box.classList.remove('hidden');
+        $('results').classList.add('stale');
+    } else {
+        box.classList.add('hidden');
+        $('results').classList.remove('stale');
     }
+}
 
-    // Calculate angle between supports (fan angle)
-    const fanAngleDeg = cornerAngleDeg / numSections;
-    const fanAngleRad = fanAngleDeg * Math.PI / 180;
-    const cornerAngleRad = cornerAngleDeg * Math.PI / 180;
+function validate(i) {
+    const bad = (v, min = 0) => !Number.isFinite(v) || v <= min;
+    if (bad(i.R)) return 'Enter a transition radius.';
+    if (bad(i.H)) return 'Enter a height.';
+    if (bad(i.cornerDeg) || i.cornerDeg > 180) return 'Corner angle must be between 1° and 180°.';
+    if (!Number.isInteger(i.n) || i.n < 1) return 'Number of sections must be a whole number of at least 1.';
+    if (bad(i.spacing)) return 'Rib spacing must be greater than zero.';
+    if (bad(i.t)) return 'Rib thickness must be greater than zero.';
+    if (bad(i.depth)) return 'Rib depth must be greater than zero.';
+    if (!Number.isFinite(i.s) || i.s < 0) return 'Support thickness can’t be negative.';
+    if (i.spacing < i.t) return 'Rib spacing is smaller than the rib thickness, so the ribs would overlap.';
+    if (i.shape === 'torus' && !(i.coping >= 0)) return 'Enter a coping radius.';
+    return null;
+}
 
-    // Calculate the angle at the top cutoff
-    // Height h = R × (1 - cos(α)), so α = arccos(1 - h/R)
-    const alphaMax = Math.acos(1 - maxHeight / radius);
+// Compound-cut angles for a rib whose skin face is sloped at angle a (0 = flat floor, 90° = vertical),
+// spanning a bay of angle φ. h = φ/2. The cut plane is the vertical face of the support.
+function cutAngles(h, a, saw) {
+    if (saw === 'edge') {
+        return { miter: Math.atan(Math.tan(h) * Math.cos(a)), bevel: Math.asin(Math.sin(h) * Math.sin(a)) };
+    }
+    return { miter: Math.atan(Math.tan(h) * Math.sin(a)), bevel: Math.asin(Math.sin(h) * Math.cos(a)) };
+}
 
-    // Layout calculations
-    // Top radius = horizontal distance from toe to top of ramp
-    const topRadius = radius * Math.sin(alphaMax);
-    // Top straight line distance = chord across entire corner at top
-    const topChord = 2 * topRadius * Math.sin(cornerAngleRad / 2);
+function calculate() {
+    const i = readInputs();
+    const err = validate(i);
+    if (err) { showError(err); return; }
 
-    // Total arc length from bottom (toe) to top (cutoff)
-    const totalArcLength = radius * alphaMax;
+    const theta = i.cornerDeg * DEG;
+    const phi = theta / i.n;
+    const h = phi / 2;
 
-    // Support thickness to deduct per rib
-    // Total deduction across corner = (numSections - 1) × supportThickness
-    // Per rib = that total / numSections
-    const thicknessPerRib = (numSections - 1) * supportThickness / numSections;
+    // Tight corner's coping radius (sphere) — the smallest possible with this radius/height.
+    const sphereTop = profile(i.R, i.H, 0).topU;
+    let r0 = 0;
+    if (i.shape === 'torus') {
+        $('coping-note').textContent = `Radius of the deck edge, seen from above. Must be at least ${formatInches(sphereTop)} (the tight-corner radius).`;
+        if (i.coping < sphereTop - 1e-9) {
+            showError(`A ${formatInches(i.coping)} coping radius is tighter than a spherical corner allows with this transition. Use at least ${formatInches(sphereTop)}, or pick the tight corner shape.`);
+            return;
+        }
+        r0 = i.coping - sphereTop;
+    }
+    const prof = profile(i.R, i.H, r0);
 
-    // Calculate rib positions (from top, measuring to bottom edge of rib)
-    // First rib: ribThickness down from top
-    // Subsequent ribs: ribThickness + n × ribSpacing
+    // Support face offsets from their layout lines
+    const oMid = i.s / 2;
+    const oEnd = i.endSupports === 'outside' ? 0 : i.s / 2;
+    // Bays: [left offset, right offset]
+    const bays = [];
+    for (let b = 0; b < i.n; b++) {
+        bays.push([b === 0 ? oEnd : oMid, b === i.n - 1 ? oEnd : oMid]);
+    }
+    // Group bays with identical offsets so the cut list shows one column per distinct length
+    const groups = [];
+    bays.forEach(([o1, o2]) => {
+        const key = (o1 + o2).toFixed(6);
+        const g = groups.find(g => g.key === key);
+        if (g) g.count++; else groups.push({ key, off: o1 + o2, count: 1, end: o1 !== oMid || o2 !== oMid });
+    });
+    groups.sort((a, b) => a.end - b.end);
+
+    const lengthAt = (u, off) => 2 * u * Math.sin(h) - off * Math.cos(h);
+    const minLen = Math.max(1, i.t);
+
     const ribs = [];
-    let distanceFromTop = ribThickness;
-
-    while (distanceFromTop < totalArcLength) {
-        // Arc length from bottom = totalArcLength - distanceFromTop
-        const arcFromBottom = totalArcLength - distanceFromTop;
-
-        // Angle from bottom: arcLength = R × α, so α = arcLength / R
-        const alpha = arcFromBottom / radius;
-
-        // Height at this position: h = R × (1 - cos(α))
-        const height = radius * (1 - Math.cos(alpha));
-
-        // Horizontal distance from toe: d = R × sin(α)
-        const horizDist = radius * Math.sin(alpha);
-
-        // Rib length: 2 × d × tan(θ/2) - thickness deduction for shared supports
-        const rawLength = 2 * horizDist * Math.tan(fanAngleRad / 2);
-        const ribLength = rawLength - thicknessPerRib;
-
-        // Compound miter angles
-        // The rib meets a surface that is:
-        // - Angled θ/2 horizontally (due to fan-out)
-        // - Sloped at angle α (tangent to curve)
-        //
-        // From the saw's perspective:
-        // Bevel (blade tilt) = arctan(tan(θ/2) × cos(α))
-        // Miter (table rotation) = arcsin(sin(θ/2) × sin(α))
-        const bevelRad = Math.atan(Math.tan(fanAngleRad / 2) * Math.cos(alpha));
-        const miterRad = Math.asin(Math.sin(fanAngleRad / 2) * Math.sin(alpha));
-
-        const miterDeg = miterRad * 180 / Math.PI;
-        const bevelDeg = bevelRad * 180 / Math.PI;
-
+    let truncated = false;
+    for (let dft = i.t; dft <= prof.total + 1e-9; dft += i.spacing) {
+        const sBottom = prof.total - dft;
+        const pb = prof.at(sBottom);
+        const pm = prof.at(sBottom + i.t / 2);
+        const lengths = groups.map(g => lengthAt(pb.u, g.off));
+        if (Math.min(...lengths) < minLen) { truncated = true; break; }
+        const ang = cutAngles(h, pm.a, i.saw);
         ribs.push({
             number: ribs.length + 1,
-            distanceFromTop: distanceFromTop,
-            arcFromBottom: arcFromBottom,
-            height: height,
-            length: ribLength,
-            miter: miterDeg,
-            bevel: bevelDeg
+            dft, sBottom,
+            u: pb.u, y: pb.y, a: pm.a,
+            lengths,
+            miter: ang.miter, bevel: ang.bevel
         });
-
-        distanceFromTop += ribSpacing;
     }
 
-    const geometry = {
-        radius: radius,
-        maxHeight: maxHeight,
-        alphaMax: alphaMax,
-        cornerAngleRad: cornerAngleRad,
-        fanAngleRad: fanAngleRad,
-        numSections: numSections,
-        topRadius: topRadius,
-        topChord: topChord,
-        fanAngleDeg: fanAngleDeg
+    // Where neighbouring supports run into each other (interior pair)
+    const uCollide = i.s > 0 ? (i.s / 2) / Math.tan(h) : 0;
+    const needsTrim = i.n > 1 && i.s > 0 && uCollide > r0 + 1e-9;
+
+    // Supports start at the toe (wide corner) or where they'd collide (tight corner)
+    const uStart = Math.max(r0, needsTrim ? uCollide : 0);
+
+    const result = {
+        uStart, i, theta, phi, h, r0, prof, ribs, groups, truncated, uCollide, needsTrim, oMid, oEnd,
+        topChord: 2 * prof.topU * Math.sin(theta / 2),
+        supportSpacing: 2 * prof.topU * Math.sin(h),
+        facet: prof.topU * (1 - Math.cos(h))
     };
+    lastResult = result;
 
-    displayResults(ribs, {
-        angleBetweenSupports: fanAngleDeg,
-        topRadius: topRadius,
-        topChord: topChord
-    });
-
-    updateVisualization(geometry, ribs);
-}
-
-function displayResults(ribs, layout) {
-    const resultsDiv = document.getElementById('results');
-    const tbody = document.querySelector('#results-table tbody');
-
-    // Clear previous results
-    tbody.innerHTML = '';
-
-    if (ribs.length === 0) {
-        resultsDiv.classList.add('hidden');
-        alert('No ribs fit within the specified dimensions.');
+    if (!ribs.length) {
+        showError('No ribs fit with these dimensions. Try a smaller rib spacing or thickness.');
         return;
     }
+    showError(null);
+    displayResults(result);
+    drawSide(result);
+    drawTop(result);
+    draw3D(result);
+    drawRibDetail(result, pinnedRib && pinnedRib <= ribs.length ? pinnedRib : Math.ceil(ribs.length / 2));
+}
 
-    // Display layout info
-    document.getElementById('angle-between-supports').textContent = `${layout.angleBetweenSupports.toFixed(1)}°`;
-    document.getElementById('top-radius').textContent = formatInches(layout.topRadius);
-    document.getElementById('top-chord').textContent = formatInches(layout.topChord);
+function displayResults(r) {
+    const { i, prof } = r;
+    $('angle-between-supports').textContent = formatDeg(r.phi);
+    $('top-radius').innerHTML = formatLong(prof.topU);
+    $('toe-radius').innerHTML = formatLong(r.r0);
+    $('top-chord').innerHTML = formatLong(r.topChord);
+    $('support-spacing').innerHTML = formatLong(r.supportSpacing);
+    $('facet-depth').textContent = formatInches(r.facet);
 
-    // Add rows
-    ribs.forEach(rib => {
+    if (i.n === 1 || i.s === 0) {
+        $('support-trim').textContent = 'None';
+        $('support-trim-note').textContent = 'The supports never touch each other.';
+    } else if (r.needsTrim) {
+        $('support-trim').innerHTML = formatLong(r.uCollide);
+        $('support-trim-note').textContent = 'The supports run into each other near the corner center. Stop each one this far out from the center (measured along the support), or end them on a hub block.';
+    } else {
+        $('support-trim').textContent = 'None';
+        $('support-trim-note').textContent = `The supports end at the toe, ${formatInches(r.r0)} from the corner center, before they would touch. Frame the flat bottom inside the toe however you like.`;
+    }
+
+    // Header
+    const head = $('results-head');
+    clear(head);
+    const th = (text, cls) => { const e = document.createElement('th'); e.innerHTML = text; if (cls) e.className = cls; head.appendChild(e); };
+    th('#');
+    th('From top');
+    th('Height', 'col-optional');
+    r.groups.forEach(g => {
+        let label = 'Length';
+        if (r.groups.length > 1) label = g.end ? 'End bays' : 'Middle bays';
+        th(`${label} <span class="qty">×${g.count}</span>`);
+    });
+    th('Miter');
+    th('Bevel');
+
+    const tbody = document.querySelector('#results-table tbody');
+    tbody.innerHTML = '';
+    let stock = 0;
+    r.ribs.forEach(rib => {
         const row = document.createElement('tr');
-        row.dataset.ribNumber = rib.number;
-        row.innerHTML = `
-            <td>${rib.number}</td>
-            <td>${formatInches(rib.distanceFromTop)}</td>
-            <td>${formatInches(rib.length)}</td>
-            <td>${rib.miter.toFixed(1)}°</td>
-            <td>${rib.bevel.toFixed(1)}°</td>
-        `;
+        row.dataset.rib = rib.number;
+        const cells = [
+            rib.number,
+            formatInches(rib.dft),
+            `<span class="col-optional-inner">${formatInches(rib.y)}</span>`,
+            ...rib.lengths.map(L => `<b>${formatInches(L)}</b>`),
+            formatDeg(rib.miter),
+            formatDeg(rib.bevel)
+        ];
+        row.innerHTML = cells.map((c, idx) => `<td${idx === 2 ? ' class="col-optional"' : ''}>${c}</td>`).join('');
+        row.addEventListener('mouseenter', () => setActiveRib(rib.number));
+        row.addEventListener('mouseleave', () => setActiveRib(pinnedRib));
+        row.addEventListener('click', () => {
+            pinnedRib = pinnedRib === rib.number ? null : rib.number;
+            setActiveRib(pinnedRib ?? rib.number);
+        });
         tbody.appendChild(row);
+        rib.lengths.forEach((L, gi) => { stock += L * r.groups[gi].count; });
     });
 
-    // Set up row hover highlighting
-    setupRibRowHighlighting();
-
-    resultsDiv.classList.remove('hidden');
+    const ribCount = r.ribs.length * i.n;
+    const sawWord = i.saw === 'edge'
+        ? 'Stand the rib on its skin face, with the lower face against the fence'
+        : 'Lay the rib flat, with its skin edge against the fence';
+    let note = `Distances are measured along the curved edge of the support, down from the top, to the lower edge of each rib. Height is the same point measured straight up from the floor. ` +
+        `Lengths are short-point measurements along the rib's lower skin-side edge, which lands exactly on the support profile at both ends. ` +
+        `${sawWord}. Both ends get the same miter and bevel, mirrored. ` +
+        `${ribCount} ribs, about ${(stock / 12).toFixed(0)} linear ft of rib stock before waste.`;
+    if (r.truncated) note += ' Ribs stop where they would get too short to fasten. Fill in below that point as you like.';
+    $('cut-list-note').textContent = note;
 }
 
-function formatInches(inches) {
-    return `${formatFraction(inches)}"`;
-}
-
-function formatFraction(inches) {
-    // Round to nearest 1/16th
-    const sixteenths = Math.round(inches * 16);
-    const whole = Math.floor(sixteenths / 16);
-    const remainder = sixteenths % 16;
-
-    if (remainder === 0) {
-        return `${whole}`;
-    }
-
-    // Simplify fraction
-    let num = remainder;
-    let den = 16;
-    while (num % 2 === 0 && den % 2 === 0) {
-        num /= 2;
-        den /= 2;
-    }
-
-    if (whole === 0) {
-        return `${num}/${den}`;
-    }
-    return `${whole}-${num}/${den}`;
-}
-
-function updateVisualization(geo, ribs) {
-    // Side view dimensions
-    const svgSize = 200;
-    const padding = 15;
-    const drawArea = svgSize - 2 * padding;
-
-    // Scale factor to fit the ramp in the view
-    const scale = drawArea / geo.radius;
-
-    // Origin for side view (bottom-left of the ramp curve)
-    const originX = padding;
-    const originY = svgSize - padding;
-
-    // Draw the arc (quarter circle from toe up to max height)
-    const arcPath = document.getElementById('viz-arc');
-    const arcEndX = originX + geo.topRadius * scale;
-    const arcEndY = originY - geo.maxHeight * scale;
-    const radiusScaled = geo.radius * scale;
-
-    // SVG arc: A rx ry x-axis-rotation large-arc-flag sweep-flag x y
-    arcPath.setAttribute('d',
-        `M ${originX} ${originY} ` +
-        `A ${radiusScaled} ${radiusScaled} 0 0 0 ${arcEndX} ${arcEndY}`
-    );
-
-    // Radius line (from center of circle to a point on the arc)
-    const vizRadius = document.getElementById('viz-radius');
-    const centerX = originX;
-    const centerY = originY - geo.radius * scale;
-    // Draw to midpoint of arc
-    const midAlpha = geo.alphaMax / 2;
-    const midArcX = originX + geo.radius * Math.sin(midAlpha) * scale;
-    const midArcY = originY - geo.radius * (1 - Math.cos(midAlpha)) * scale;
-    vizRadius.setAttribute('x1', centerX);
-    vizRadius.setAttribute('y1', centerY);
-    vizRadius.setAttribute('x2', midArcX);
-    vizRadius.setAttribute('y2', midArcY);
-
-    // Radius label
-    const vizRadiusLabel = document.getElementById('viz-radius-label');
-    vizRadiusLabel.setAttribute('x', (centerX + midArcX) / 2 - 12);
-    vizRadiusLabel.setAttribute('y', (centerY + midArcY) / 2 + 8);
-
-    // Height line (vertical from ground to top of ramp)
-    const vizHeight = document.getElementById('viz-height');
-    vizHeight.setAttribute('x1', arcEndX);
-    vizHeight.setAttribute('y1', originY);
-    vizHeight.setAttribute('x2', arcEndX);
-    vizHeight.setAttribute('y2', arcEndY);
-
-    // Height label
-    const vizHeightLabel = document.getElementById('viz-height-label');
-    vizHeightLabel.setAttribute('x', arcEndX + 5);
-    vizHeightLabel.setAttribute('y', (originY + arcEndY) / 2);
-
-    // Top radius line (horizontal from toe to top)
-    const vizTopRadius = document.getElementById('viz-top-radius');
-    vizTopRadius.setAttribute('x1', originX);
-    vizTopRadius.setAttribute('y1', arcEndY);
-    vizTopRadius.setAttribute('x2', arcEndX);
-    vizTopRadius.setAttribute('y2', arcEndY);
-
-    // Draw ribs on side view
-    const vizRibs = document.getElementById('viz-ribs');
-    vizRibs.innerHTML = '';
-    ribs.forEach(rib => {
-        const alpha = rib.arcFromBottom / geo.radius;
-        const ribX = originX + geo.radius * Math.sin(alpha) * scale;
-        const ribY = originY - geo.radius * (1 - Math.cos(alpha)) * scale;
-
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', ribX);
-        circle.setAttribute('cy', ribY);
-        circle.setAttribute('r', 3);
-        circle.setAttribute('fill', '#e83e8c');
-        circle.setAttribute('id', `viz-rib-${rib.number}`);
-        vizRibs.appendChild(circle);
-    });
-
-    // Top view
-    const topOriginX = 100; // Center of view
-    const topOriginY = 185; // Bottom (toe point)
-    // Scale to fit - need to account for both width (chord) and height (topRadius)
-    const halfCornerAngle = geo.cornerAngleRad / 2;
-    const viewWidth = geo.topRadius * Math.sin(halfCornerAngle) * 2; // chord width
-    const viewHeight = geo.topRadius; // full radius for height
-    const scaleForWidth = 180 / viewWidth;
-    const scaleForHeight = 150 / viewHeight;
-    const topScale = Math.min(scaleForWidth, scaleForHeight); // Use smaller scale to fit both
-
-    // Draw supports (fan lines)
-    const vizSupports = document.getElementById('viz-supports');
-    vizSupports.innerHTML = '';
-    const halfCorner = geo.cornerAngleRad / 2;
-    for (let i = 0; i <= geo.numSections; i++) {
-        const angle = -halfCorner + (i * geo.fanAngleRad);
-        const lineEndX = topOriginX + Math.sin(angle) * geo.topRadius * topScale;
-        const lineEndY = topOriginY - Math.cos(angle) * geo.topRadius * topScale;
-
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('x1', topOriginX);
-        line.setAttribute('y1', topOriginY);
-        line.setAttribute('x2', lineEndX);
-        line.setAttribute('y2', lineEndY);
-        line.setAttribute('stroke', '#999');
-        line.setAttribute('stroke-width', '1');
-        vizSupports.appendChild(line);
-    }
-
-    // Top arc
-    const vizTopArc = document.getElementById('viz-top-arc');
-    const topArcRadius = geo.topRadius * topScale;
-    const startAngle = -halfCorner;
-    const endAngle = halfCorner;
-    const startX = topOriginX + Math.sin(startAngle) * topArcRadius;
-    const startY = topOriginY - Math.cos(startAngle) * topArcRadius;
-    const endX = topOriginX + Math.sin(endAngle) * topArcRadius;
-    const endY = topOriginY - Math.cos(endAngle) * topArcRadius;
-    const largeArc = geo.cornerAngleRad > Math.PI ? 1 : 0;
-    vizTopArc.setAttribute('d',
-        `M ${startX} ${startY} A ${topArcRadius} ${topArcRadius} 0 ${largeArc} 1 ${endX} ${endY}`
-    );
-
-    // Top chord
-    const vizChord = document.getElementById('viz-chord');
-    vizChord.setAttribute('x1', startX);
-    vizChord.setAttribute('y1', startY);
-    vizChord.setAttribute('x2', endX);
-    vizChord.setAttribute('y2', endY);
-
-    // Corner angle arc (small arc near toe to show the angle)
-    const vizCornerAngle = document.getElementById('viz-corner-angle');
-    const angleArcRadius = 30;
-    const angleStartX = topOriginX + Math.sin(startAngle) * angleArcRadius;
-    const angleStartY = topOriginY - Math.cos(startAngle) * angleArcRadius;
-    const angleEndX = topOriginX + Math.sin(endAngle) * angleArcRadius;
-    const angleEndY = topOriginY - Math.cos(endAngle) * angleArcRadius;
-    vizCornerAngle.setAttribute('d',
-        `M ${angleStartX} ${angleStartY} A ${angleArcRadius} ${angleArcRadius} 0 0 1 ${angleEndX} ${angleEndY}`
-    );
-
-    // Angle label
-    const vizAngleLabel = document.getElementById('viz-angle-label');
-    vizAngleLabel.setAttribute('x', topOriginX - 15);
-    vizAngleLabel.setAttribute('y', topOriginY - angleArcRadius - 5);
-    vizAngleLabel.textContent = `${Math.round(geo.cornerAngleRad * 180 / Math.PI)}°`;
-
-    // Isometric 3D view
-    updateIsometricView(geo, ribs);
-}
-
-function updateIsometricView(geo, ribs) {
-    // Isometric projection - view from front-left, looking at the curved ramp surface
-    // We want to see the curve rising up from the toe
-
-    // The bowl geometry:
-    // - Toe is at origin (0,0,0)
-    // - Supports fan out in the XZ plane
-    // - Height (Y) goes up
-    // - With 90° corner, middle of bowl faces +Z direction
-
-    // We'll view from: front-left-below, looking toward the bowl
-    // This means looking from negative Z, negative X, and seeing Y go up
-
-    const project3D = (x, y, z) => {
-        // Dimetric-style projection for better depth perception
-        // Rotate model around Y, then tilt to view from above
-        const angleY = Math.PI / 5 + Math.PI / 2;  // Rotate around vertical axis (+90°)
-        const angleX = Math.PI / 4;  // Tilt to view from above (45°)
-
-        // Rotate around Y axis
-        const x1 = x * Math.cos(angleY) - z * Math.sin(angleY);
-        const z1 = x * Math.sin(angleY) + z * Math.cos(angleY);
-        const y1 = y;
-
-        // Rotate around X axis (tilt forward)
-        const y2 = y1 * Math.cos(angleX) - z1 * Math.sin(angleX);
-        const z2 = y1 * Math.sin(angleX) + z1 * Math.cos(angleX);
-        const x2 = x1;
-
-        // Project to 2D (orthographic)
-        return {
-            x: x2,
-            y: -y2  // Flip Y for screen coordinates
-        };
-    };
-
-    // Scale and offset to fit in viewBox
-    const isoScale = 1.3;
-    const offsetX = 125;
-    const offsetY = 150;
-
-    const project = (x, y, z) => {
-        const p = project3D(x, y, z);
-        return { x: p.x * isoScale + offsetX, y: p.y * isoScale + offsetY };
-    };
-
-    // Generate points along each support's curve
-    const numCurvePoints = 20;
-    const supportCurves = [];
-    const halfCorner = geo.cornerAngleRad / 2;
-
-    for (let s = 0; s <= geo.numSections; s++) {
-        const angle = -halfCorner + (s * geo.fanAngleRad);
-        const curve = [];
-
-        for (let i = 0; i <= numCurvePoints; i++) {
-            const alpha = (i / numCurvePoints) * geo.alphaMax;
-            const height = geo.radius * (1 - Math.cos(alpha));
-            const horizDist = geo.radius * Math.sin(alpha);
-
-            // 3D position: x = horizDist * sin(angle), z = horizDist * cos(angle), y = height
-            const x = horizDist * Math.sin(angle);
-            const z = horizDist * Math.cos(angle);
-            const y = height;
-
-            curve.push({ x, y, z, alpha });
-        }
-        supportCurves.push(curve);
-    }
-
-    // Draw bowl surface (filled polygons between supports)
-    const vizSurface = document.getElementById('viz-iso-surface');
-    vizSurface.innerHTML = '';
-
-    for (let s = 0; s < geo.numSections; s++) {
-        const curve1 = supportCurves[s];
-        const curve2 = supportCurves[s + 1];
-
-        // Create a polygon for this section
-        const points = [];
-
-        // Go up curve1
-        for (let i = 0; i <= numCurvePoints; i++) {
-            const p = project(curve1[i].x, curve1[i].y, curve1[i].z);
-            points.push(`${p.x},${p.y}`);
-        }
-
-        // Go down curve2
-        for (let i = numCurvePoints; i >= 0; i--) {
-            const p = project(curve2[i].x, curve2[i].y, curve2[i].z);
-            points.push(`${p.x},${p.y}`);
-        }
-
-        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-        polygon.setAttribute('points', points.join(' '));
-        polygon.setAttribute('fill', `hsl(200, 20%, ${75 - s * 3}%)`);
-        polygon.setAttribute('stroke', '#999');
-        polygon.setAttribute('stroke-width', '0.5');
-        vizSurface.appendChild(polygon);
-    }
-
-    // Draw support frame lines
-    const vizIsoSupports = document.getElementById('viz-iso-supports');
-    vizIsoSupports.innerHTML = '';
-
-    supportCurves.forEach((curve, idx) => {
-        const pathPoints = curve.map(pt => {
-            const p = project(pt.x, pt.y, pt.z);
-            return `${p.x},${p.y}`;
-        });
-
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        path.setAttribute('points', pathPoints.join(' '));
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke', '#666');
-        path.setAttribute('stroke-width', '1.5');
-        vizIsoSupports.appendChild(path);
-    });
-
-    // Draw ribs
-    const vizIsoRibs = document.getElementById('viz-iso-ribs');
-    vizIsoRibs.innerHTML = '';
-
-    ribs.forEach(rib => {
-        const alpha = rib.arcFromBottom / geo.radius;
-
-        for (let s = 0; s < geo.numSections; s++) {
-            const angle1 = -halfCorner + (s * geo.fanAngleRad);
-            const angle2 = -halfCorner + ((s + 1) * geo.fanAngleRad);
-
-            const horizDist = geo.radius * Math.sin(alpha);
-            const height = geo.radius * (1 - Math.cos(alpha));
-
-            const x1 = horizDist * Math.sin(angle1);
-            const z1 = horizDist * Math.cos(angle1);
-            const x2 = horizDist * Math.sin(angle2);
-            const z2 = horizDist * Math.cos(angle2);
-
-            const p1 = project(x1, height, z1);
-            const p2 = project(x2, height, z2);
-
-            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            line.setAttribute('x1', p1.x);
-            line.setAttribute('y1', p1.y);
-            line.setAttribute('x2', p2.x);
-            line.setAttribute('y2', p2.y);
-            line.setAttribute('stroke', '#e83e8c');
-            line.setAttribute('stroke-width', '1.5');
-            line.setAttribute('class', `iso-rib-${rib.number}`);
-            vizIsoRibs.appendChild(line);
-        }
-    });
-
-    // Draw deck edge (top arc)
-    const vizIsoDeck = document.getElementById('viz-iso-deck');
-    const deckPoints = [];
-    for (let s = 0; s <= geo.numSections; s++) {
-        const curve = supportCurves[s];
-        const topPt = curve[curve.length - 1];
-        const p = project(topPt.x, topPt.y, topPt.z);
-        deckPoints.push(`${p.x},${p.y}`);
-    }
-    vizIsoDeck.setAttribute('d', 'M ' + deckPoints.join(' L '));
-}
-
-// Rib row hover highlighting
-function setupRibRowHighlighting() {
+function setActiveRib(n) {
+    activeRib = n;
     document.querySelectorAll('#results-table tbody tr').forEach(row => {
-        row.addEventListener('mouseenter', () => {
-            const ribNumber = row.dataset.ribNumber;
-            // Highlight dot in side view
-            const dot = document.getElementById(`viz-rib-${ribNumber}`);
-            if (dot) {
-                dot.setAttribute('r', '6');
-                dot.setAttribute('fill', '#ff0066');
-            }
-            // Highlight lines in isometric view
-            document.querySelectorAll(`.iso-rib-${ribNumber}`).forEach(line => {
-                line.setAttribute('stroke', '#ff0066');
-                line.setAttribute('stroke-width', '3');
-            });
-        });
-
-        row.addEventListener('mouseleave', () => {
-            const ribNumber = row.dataset.ribNumber;
-            // Reset dot in side view
-            const dot = document.getElementById(`viz-rib-${ribNumber}`);
-            if (dot) {
-                dot.setAttribute('r', '3');
-                dot.setAttribute('fill', '#e83e8c');
-            }
-            // Reset lines in isometric view
-            document.querySelectorAll(`.iso-rib-${ribNumber}`).forEach(line => {
-                line.setAttribute('stroke', '#e83e8c');
-                line.setAttribute('stroke-width', '1.5');
-            });
-        });
+        row.classList.toggle('active', +row.dataset.rib === n);
+        row.classList.toggle('pinned', +row.dataset.rib === pinnedRib);
     });
+    document.querySelectorAll('.visualization [data-rib]').forEach(e => {
+        e.classList.toggle('active', +e.dataset.rib === n);
+    });
+    iso && iso.render();
+    if (n && lastResult) drawRibDetail(lastResult, n);
 }
 
-// Hover highlighting
-function setupHighlighting() {
-    const sideView = document.getElementById('side-view');
-    const topView = document.getElementById('top-view');
-    const isoView = document.getElementById('iso-view');
-
-    document.querySelectorAll('[data-highlight]').forEach(el => {
-        el.addEventListener('mouseenter', () => {
-            const highlightType = el.dataset.highlight;
-            sideView.classList.add(`highlight-${highlightType}`);
-            topView.classList.add(`highlight-${highlightType}`);
-            isoView.classList.add(`highlight-${highlightType}`);
-        });
-
-        el.addEventListener('mouseleave', () => {
-            const highlightType = el.dataset.highlight;
-            sideView.classList.remove(`highlight-${highlightType}`);
-            topView.classList.remove(`highlight-${highlightType}`);
-            isoView.classList.remove(`highlight-${highlightType}`);
-        });
-    });
+// ---------- Support profile (side view) ----------
+function supportOutline(prof, uStart) {
+    // Plywood template in (u, y): floor from uStart, up the profile, back behind the coping and down.
+    const back = Math.max(3, prof.R * 0.06);
+    const outline = [[uStart, 0]];
+    prof.samples(40).forEach(p => { if (p.u >= uStart) outline.push([p.u, p.y]); });
+    outline.push([prof.topU + back, prof.H], [prof.topU + back, 0]);
+    return outline;
 }
 
-// Calculate on page load with default values
-document.addEventListener('DOMContentLoaded', () => {
-    calculateRibs();
-    setupHighlighting();
-});
+function ribSection(prof, rib, t, depth) {
+    // Cross-section of a rib in the support plane (u, y)
+    const pb = prof.at(rib.sBottom);
+    const pt = prof.at(rib.sBottom + t);
+    const n = [Math.sin(rib.a), -Math.cos(rib.a)]; // away from the bowl, into the framing
+    return [
+        [pb.u, pb.y], [pt.u, pt.y],
+        [pt.u + n[0] * depth, pt.y + n[1] * depth],
+        [pb.u + n[0] * depth, pb.y + n[1] * depth]
+    ];
+}
+
+function drawSide(r) {
+    const svg = $('side-view');
+    clear(svg);
+    const { prof, i } = r;
+    const uStart = r.uStart;
+    const outline = supportOutline(prof, uStart);
+    const back = outline[outline.length - 1][0];
+    const f = fitter([[0, 0], [back + prof.R * 0.08, prof.H], [0, prof.H + prof.R * 0.1], [-prof.R * 0.06, 0]], 220, 200, 14);
+    const P = ([u, y]) => f(u, y);
+
+    el('line', { x1: P([-prof.R, 0])[0], y1: P([0, 0])[1], x2: 220, y2: P([0, 0])[1], class: 'ground' }, svg);
+    // Corner center axis
+    const ax0 = P([0, 0]), ax1 = P([0, prof.H + prof.R * 0.05]);
+    el('line', { x1: ax0[0], y1: ax0[1], x2: ax1[0], y2: ax1[1], class: 'axis' }, svg);
+
+    el('polygon', { points: pts(outline.map(P)), class: 'ply' }, svg);
+    el('polyline', { points: pts(prof.samples(60).map(p => P([p.u, p.y]))), class: 'surface' }, svg);
+
+    // Ribs
+    const g = el('g', { class: 'ribs' }, svg);
+    r.ribs.forEach(rib => {
+        el('polygon', { points: pts(ribSection(prof, rib, i.t, i.depth).map(P)), class: 'rib', 'data-rib': rib.number }, g);
+    });
+
+    // Radius
+    const c = P([r.r0, prof.R]);
+    const mid = prof.at(Math.min(prof.arcLen, prof.total) * 0.55);
+    dim(svg, c, P([mid.u, mid.y]), 'R', 'dim-radius', 6);
+    // Height
+    const hx = back + prof.R * 0.05;
+    dim(svg, P([hx, 0]), P([hx, prof.H]), 'H', 'dim-height', 7);
+    // Coping radius
+    const ty = prof.H + prof.R * 0.05;
+    dim(svg, P([0, ty]), P([prof.topU, ty]), formatInches(prof.topU), 'dim-top-radius', -6);
+    // Toe radius
+    if (r.r0 > 0) dim(svg, P([0, -prof.R * 0.0]), P([r.r0, 0]), '', 'dim-toe', 0);
+    // Trim
+    if (r.needsTrim) {
+        const tp = P([r.uCollide, 0]);
+        el('circle', { cx: tp[0], cy: tp[1], r: 2.5, class: 'trim-mark' }, svg);
+    }
+}
+
+// ---------- Top view ----------
+function boundaryDirs(psi, side) {
+    const radial = [Math.sin(psi), Math.cos(psi)];
+    const tangent = [side * Math.cos(psi), -side * Math.sin(psi)];
+    return { radial, tangent };
+}
+
+function drawTop(r) {
+    const svg = $('top-view');
+    clear(svg);
+    const { prof, i, theta, phi } = r;
+    const halfT = theta / 2;
+    const XY = (u, psi) => [u * Math.sin(psi), u * Math.cos(psi)];
+    const wallLen = prof.topU * 0.45;
+    const back = prof.topU + Math.max(3, prof.R * 0.06);
+    const uStart = r.uStart;
+
+    // Bounds
+    const bound = [[0, 0]];
+    [-1, 1].forEach(side => {
+        const psi = side * halfT;
+        const { tangent } = boundaryDirs(psi, side);
+        const c = XY(prof.topU, psi);
+        bound.push(c, [c[0] + tangent[0] * wallLen, c[1] + tangent[1] * wallLen]);
+    });
+    for (let k = 0; k <= 16; k++) bound.push(XY(back, -halfT + theta * k / 16));
+    const f = fitter(bound, 220, 200, 12);
+    const P = ([x, y]) => f(x, y);
+    const arc = (u, a0, a1, cls, steps = 48) => {
+        const list = [];
+        for (let k = 0; k <= steps; k++) list.push(P(XY(u, a0 + (a1 - a0) * k / steps)));
+        return el('polyline', { points: pts(list), class: cls }, svg);
+    };
+
+    // Straight walls continuing out of the corner
+    [-1, 1].forEach(side => {
+        const psi = side * halfT;
+        const { tangent } = boundaryDirs(psi, side);
+        [prof.topU, r.r0].forEach((u, k) => {
+            if (u === 0 && k === 1) return;
+            const a = XY(u, psi), b = [a[0] + tangent[0] * wallLen, a[1] + tangent[1] * wallLen];
+            el('line', { x1: P(a)[0], y1: P(a)[1], x2: P(b)[0], y2: P(b)[1], class: k === 0 ? 'wall-edge' : 'toe-line' }, svg);
+        });
+    });
+
+    // Supports
+    const sg = el('g', { class: 'supports' }, svg);
+    for (let k = 0; k <= i.n; k++) {
+        const psi = -halfT + k * phi;
+        const a = P(XY(uStart, psi)), b = P(XY(back, psi));
+        el('line', { x1: a[0], y1: a[1], x2: b[0], y2: b[1], class: 'support' }, sg);
+    }
+
+    // Ribs as straight chords in each bay — shows the faceting
+    const rg = el('g', { class: 'ribs' }, svg);
+    r.ribs.forEach(rib => {
+        const list = [];
+        for (let k = 0; k <= i.n; k++) list.push(P(XY(rib.u, -halfT + k * phi)));
+        el('polyline', { points: pts(list), class: 'rib-line', 'data-rib': rib.number }, rg);
+    });
+
+    // Coping & toe
+    arc(prof.topU, -halfT, halfT, 'coping');
+    if (r.r0 > 0) arc(r.r0, -halfT, halfT, 'toe-line');
+
+    // Chord
+    const c1 = P(XY(prof.topU, -halfT)), c2 = P(XY(prof.topU, halfT));
+    el('line', { x1: c1[0], y1: c1[1], x2: c2[0], y2: c2[1], class: 'chord' }, svg);
+
+    // Coping radius
+    const rr = P(XY(prof.topU, 0));
+    el('line', { x1: P([0, 0])[0], y1: P([0, 0])[1], x2: rr[0], y2: rr[1], class: 'top-radius-line' }, svg);
+
+    // Corner angle
+    const angR = Math.min(prof.topU * 0.22, 26 / f.scale);
+    arc(angR, -halfT, halfT, 'angle-arc', 24);
+    const lab = P(XY(angR * 1.6, 0));
+    el('text', { x: lab[0] + 4, y: lab[1] + 3, class: 'angle-label', text: `${i.cornerDeg}°` }, svg);
+    const o = P([0, 0]);
+    el('circle', { cx: o[0], cy: o[1], r: 2.2, class: 'center-dot' }, svg);
+}
+
+// ---------- 3D view ----------
+function draw3D(r) {
+    const { prof, i, theta, phi } = r;
+    const halfT = theta / 2;
+    const W = (u, y, psi) => [u * Math.sin(psi), y, u * Math.cos(psi)];
+    const scene = [];
+    const uStart = r.uStart;
+    const samples = prof.samples(18);
+    const showSkin = $('show-skin').checked;
+    const showWalls = $('show-walls').checked;
+    const wallLen = prof.topU * 0.45;
+
+    // Floor
+    const floor = [];
+    const toeU = r.r0;
+    const wallEnds = [-1, 1].map(side => {
+        const psi = side * halfT;
+        const { radial, tangent } = boundaryDirs(psi, side);
+        const t0 = [toeU * radial[0], toeU * radial[1]];
+        const e = [t0[0] + tangent[0] * wallLen, t0[1] + tangent[1] * wallLen];
+        const inward = [e[0] - radial[0] * wallLen * 1.2, e[1] - radial[1] * wallLen * 1.2];
+        return { e, inward };
+    });
+    floor.push([wallEnds[0].inward[0], 0, wallEnds[0].inward[1]], [wallEnds[0].e[0], 0, wallEnds[0].e[1]]);
+    for (let k = 0; k <= 16; k++) floor.push(W(toeU, 0, -halfT + theta * k / 16));
+    floor.push([wallEnds[1].e[0], 0, wallEnds[1].e[1]], [wallEnds[1].inward[0], 0, wallEnds[1].inward[1]]);
+    scene.push({ type: 'poly', pts: floor, cls: 'floor3d', bias: 10 });
+
+    // Supports (plywood templates)
+    const outline = supportOutline(prof, uStart);
+    for (let k = 0; k <= i.n; k++) {
+        const psi = -halfT + k * phi;
+        scene.push({ type: 'poly', pts: outline.map(([u, y]) => W(u, y, psi)), cls: 'ply3d', shade: [38, 45, 35, 72] });
+    }
+
+    // Ribs (as the skin-side edge, straight across each bay)
+    r.ribs.forEach(rib => {
+        for (let k = 0; k < i.n; k++) {
+            scene.push({
+                type: 'line', cls: 'rib3d', rib: rib.number,
+                pts: [W(rib.u, rib.y, -halfT + k * phi), W(rib.u, rib.y, -halfT + (k + 1) * phi)],
+                bias: -0.01
+            });
+        }
+    });
+
+    // Skin: flat facets between supports
+    if (showSkin) {
+        for (let k = 0; k < i.n; k++) {
+            const a = -halfT + k * phi, b = a + phi;
+            for (let j = 0; j < samples.length - 1; j++) {
+                const p = samples[j], q = samples[j + 1];
+                scene.push({ type: 'poly', cls: 'skin3d', shade: [205, 35, 30, 78], pts: [W(p.u, p.y, a), W(q.u, q.y, a), W(q.u, q.y, b), W(p.u, p.y, b)], bias: -0.02 });
+            }
+        }
+    }
+
+    // Straight walls continuing out of the corner
+    if (showWalls) {
+        [-1, 1].forEach(side => {
+            const psi = side * halfT;
+            const { tangent } = boundaryDirs(psi, side);
+            for (let j = 0; j < samples.length - 1; j++) {
+                const p = samples[j], q = samples[j + 1];
+                const a = W(p.u, p.y, psi), b = W(q.u, q.y, psi);
+                const off = v => [v[0] + tangent[0] * wallLen, v[1], v[2] + tangent[1] * wallLen];
+                scene.push({ type: 'poly', cls: 'wall3d', shade: [205, 15, 30, 70], pts: [a, b, off(b), off(a)] });
+            }
+            const top = W(prof.topU, prof.H, psi);
+            scene.push({ type: 'line', cls: 'coping3d', pts: [top, [top[0] + tangent[0] * wallLen, top[1], top[2] + tangent[1] * wallLen]], bias: -0.05 });
+        });
+    }
+
+    // Coping line across the corner
+    const coping = [];
+    for (let k = 0; k <= i.n; k++) coping.push(W(prof.topU, prof.H, -halfT + k * phi));
+    for (let k = 0; k < i.n; k++) scene.push({ type: 'line', cls: 'coping3d', pts: [coping[k], coping[k + 1]], bias: -0.05 });
+
+    iso.setScene(scene);
+}
+
+// ---------- Rib detail ----------
+function drawRibDetail(r, n) {
+    const rib = r.ribs[n - 1];
+    if (!rib) return;
+    const svg = $('rib-detail');
+    clear(svg);
+    const { i, h } = r;
+    const flat = i.saw !== 'edge';
+    const visW = flat ? i.depth : i.t; // width of the face lying on the saw table
+    // How much closer to the corner center the far edge of the table face is than the reference edge.
+    // Negative: the far edge is further out, so it is longer. The reference edge is always the short point.
+    const shift = flat ? -i.depth * Math.sin(rib.a) : -i.t * Math.cos(rib.a);
+    const ref = rib.lengths[0];
+    const far = ref - 2 * shift * Math.tan(h);
+
+    // Schematic: true angles, exaggerated width
+    const Lpx = 230, Wpx = 46;
+    const dx = Wpx * Math.tan(rib.miter) * Math.sign(shift || 1);
+    const x0 = (320 - Lpx) / 2, yFence = 112, yFar = yFence - Wpx;
+    const board = [[x0, yFence], [x0 + Lpx, yFence], [x0 + Lpx - dx, yFar], [x0 + dx, yFar]];
+    el('line', { x1: 8, y1: yFence + 2, x2: 312, y2: yFence + 2, class: 'fence' }, svg);
+    el('text', { x: 312, y: yFence + 14, class: 'detail-label', 'text-anchor': 'end', text: 'fence' }, svg);
+    el('polygon', { points: pts(board), class: 'board' }, svg);
+    el('line', { x1: x0, y1: yFence, x2: x0 + Lpx, y2: yFence, class: 'ref-edge' }, svg);
+    el('text', { x: 160, y: yFence + 14, class: 'detail-label strong', 'text-anchor': 'middle', text: `${formatInches(ref)} measured here` }, svg);
+    el('text', { x: 160, y: yFar - 6, class: 'detail-label', 'text-anchor': 'middle', text: `${formatInches(far)} on the far edge` }, svg);
+    // Square reference + miter angle at left end
+    el('line', { x1: x0, y1: yFence, x2: x0, y2: yFar - 8, class: 'square-ref' }, svg);
+    el('text', { x: x0 + 4, y: yFar - 12, class: 'detail-label', 'text-anchor': 'start', text: `miter ${formatDeg(rib.miter)}` }, svg);
+    el('text', { x: 160, y: 22, class: 'detail-label', 'text-anchor': 'middle', text: `blade tilted ${formatDeg(rib.bevel)} (bevel)` }, svg);
+    el('text', { x: 160, y: 36, class: 'detail-label subtle', 'text-anchor': 'middle', text: 'not to scale · angles true' }, svg);
+
+    $('rib-detail-title').textContent = `#${rib.number}`;
+    const lens = r.groups.map((g, gi) => `${r.groups.length > 1 ? (g.end ? 'end bays' : 'middle bays') + ' ' : ''}${formatInches(rib.lengths[gi])} ×${g.count}`).join(', ');
+    $('rib-detail-text').textContent =
+        `Rib ${rib.number} sits ${formatInches(rib.dft)} down the curve (${formatInches(rib.y)} off the floor), with its skin face sloped ${formatDeg(rib.a, 0)}. ` +
+        `Cut ${lens}. ${flat ? 'Lay it flat on the saw with the skin edge against the fence.' : 'Stand it on its skin face with the lower face against the fence.'} ` +
+        `Miter ${formatDeg(rib.miter)}, bevel ${formatDeg(rib.bevel)}. Cut the other end mirrored.`;
+}
